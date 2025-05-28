@@ -1,0 +1,74 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: ubuntu-vm
+  labels:
+    app: ubuntu-vm
+spec:
+  runStrategy: Always
+  dataVolumeTemplates:
+    - metadata:
+        name: ubuntu-dv
+      spec:
+        source:
+          http:
+            url: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
+            # For faster downloads, you may want to mirror this image to a closer location
+            # CDI also supports other sources like registry, s3, etc.
+        pvc:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 20Gi
+          storageClassName: standard
+  template:
+    metadata:
+      labels:
+        app: ubuntu-vm
+        kubevirt.io/size: medium
+    spec:
+      domain:
+        cpu:
+          cores: 2
+          sockets: 1
+          threads: 1
+        features:
+          acpi: {}
+        devices:
+          disks:
+            - name: rootdisk
+              disk:
+                bus: virtio
+            - name: cloudinitdisk
+              disk:
+                bus: virtio
+          interfaces:
+            - name: default
+              masquerade: {}
+            - name: bridge-net
+              bridge: {}
+          rng: {}
+        resources:
+          requests:
+            memory: 4Gi
+        firmware:
+          bootloader:
+            efi:
+              secureBoot: false
+      networks:
+        - name: default
+          pod: {}
+        - name: bridge-net
+          multus:
+            networkName: bridge-net
+      volumes:
+        - name: rootdisk
+          dataVolume:
+            name: ubuntu-dv
+        - name: cloudinitdisk
+          cloudInitNoCloud:
+            userData: |
+              #cloud-config
+              runcmd:
+                - ip link set dev eth0 mtu 1500
