@@ -23,11 +23,13 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Configure Git for private repos
+        run: |
+          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
       - name: Install dependencies
         run: |
-          go get ./...
-          go get -t ./...
-          go vet ./...
+          go mod download
 
       - name: Build
         run: |
