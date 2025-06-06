@@ -102,7 +102,9 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		vm, err = r.createVirtualMachine(ctx, machine)
 		if err != nil {
 			logger.Error(err, "Failed to create VirtualMachine")
-			r.updateMachineStatus(ctx, machine, "Failed", fmt.Sprintf("Failed to create VirtualMachine: %v", err))
+			if statusErr := r.updateMachineStatus(ctx, machine, "Failed"); statusErr != nil {
+				logger.Error(statusErr, "Failed to update machine status after VM creation failure")
+			}
 			return ctrl.Result{RequeueAfter: time.Minute}, err
 		}
 		logger.Info("Created VirtualMachine", "virtualmachine", vm.Name)
@@ -120,17 +122,39 @@ func (r *MachineReconciler) createVirtualMachine(ctx context.Context, machine *v
 
 	vmName := fmt.Sprintf("vm-%s", machine.Name)
 
-	// Default resource values if not specified in machine spec
+	// Default resource values based on machine spec
 	memoryRequest := "1Gi"
 	cpuRequest := "1"
 
-	// Convert machine spec to VM spec if available
-	if machine.Status.Memory > 0 {
-		memoryRequest = fmt.Sprintf("%dBi", machine.Status.Memory)
+	// Use simple defaults based on machine type from the external CRD
+	if machine.Spec.InstanceType != "" {
+		switch machine.Spec.InstanceType {
+		case "small":
+			memoryRequest = "1Gi"
+			cpuRequest = "1"
+		case "medium":
+			memoryRequest = "2Gi"
+			cpuRequest = "2"
+		case "large":
+			memoryRequest = "4Gi"
+			cpuRequest = "4"
+		default:
+			memoryRequest = "1Gi"
+			cpuRequest = "1"
+		}
 	}
-	if machine.Status.CPUs > 0 {
-		cpuRequest = fmt.Sprintf("%d", machine.Status.CPUs)
+
+	// Override with spec values if provided
+	if machine.Spec.Memory > 0 {
+		memoryRequest = fmt.Sprintf("%dMi", machine.Spec.Memory/1024/1024) // Convert bytes to MiB
 	}
+	if machine.Spec.CPU.Cores > 0 {
+		cpuRequest = fmt.Sprintf("%d", machine.Spec.CPU.Cores)
+	}
+
+	// Create a local variable for RunStrategy since we need its address
+	// Using RunStrategyAlways to ensure the VM starts automatically (replaces deprecated Running: true)
+	runStrategy := kubevirtv1.RunStrategyAlways
 
 	vm := &kubevirtv1.VirtualMachine{
 		ObjectMeta: metav1.ObjectMeta{
@@ -142,7 +166,7 @@ func (r *MachineReconciler) createVirtualMachine(ctx context.Context, machine *v
 			},
 		},
 		Spec: kubevirtv1.VirtualMachineSpec{
-			Running: &[]bool{true}[0], // Start the VM
+			RunStrategy: &runStrategy, // Use modern RunStrategy instead of deprecated Running field
 			Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -202,25 +226,22 @@ func (r *MachineReconciler) createVirtualMachine(ctx context.Context, machine *v
 func (r *MachineReconciler) updateMachineStatusFromVM(ctx context.Context, machine *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Determine status based on VirtualMachine state
-	var status, state string
+	// Determine state based on VirtualMachine state
+	var state string
 	var requeue bool
 
 	if vm.Status.Ready {
-		status = "Ready"
 		state = "Running"
 	} else if vm.Status.Created {
-		status = "Creating"
 		state = "Pending"
 		requeue = true
 	} else {
-		status = "Pending"
 		state = "Pending"
 		requeue = true
 	}
 
 	// Update machine status
-	if err := r.updateMachineStatus(ctx, machine, status, state); err != nil {
+	if err := r.updateMachineStatus(ctx, machine, state); err != nil {
 		logger.Error(err, "Failed to update Machine status")
 		return ctrl.Result{}, err
 	}
@@ -233,13 +254,45 @@ func (r *MachineReconciler) updateMachineStatusFromVM(ctx context.Context, machi
 	return ctrl.Result{}, nil
 }
 
-func (r *MachineReconciler) updateMachineStatus(ctx context.Context, machine *vitistackv1alpha1.Machine, status, state string) error {
-	machine.Status.Status = status
-	machine.Status.State = state
-	machine.Status.LastUpdated = metav1.Now()
-	machine.Status.Provider = "kubevirt"
+func (r *MachineReconciler) updateMachineStatus(ctx context.Context, machine *vitistackv1alpha1.Machine, state string) error {
+	logger := log.FromContext(ctx)
 
-	return r.Status().Update(ctx, machine)
+	// Retry logic for status updates to handle resource version conflicts
+	maxRetries := 3
+	for i := 0; i < maxRetries; i++ {
+		// Get the latest version of the Machine to avoid resource version conflicts
+		latestMachine := &vitistackv1alpha1.Machine{}
+		if err := r.Get(ctx, types.NamespacedName{
+			Name:      machine.Name,
+			Namespace: machine.Namespace,
+		}, latestMachine); err != nil {
+			logger.Error(err, "Failed to get latest Machine for status update")
+			return err
+		}
+
+		// Update the status fields - only use fields that exist in the external CRD
+		latestMachine.Status.State = state
+		latestMachine.Status.LastUpdated = metav1.Now()
+		latestMachine.Status.Provider = "kubevirt"
+
+		// Attempt to update the status
+		if err := r.Status().Update(ctx, latestMachine); err != nil {
+			if errors.IsConflict(err) && i < maxRetries-1 {
+				logger.Info("Resource conflict during status update, retrying", "attempt", i+1)
+				// Brief delay before retry
+				time.Sleep(time.Millisecond * 100)
+				continue
+			}
+			return err
+		}
+
+		// Success - update the passed machine object with the latest values for consistency
+		machine.Status = latestMachine.Status
+		machine.ObjectMeta.ResourceVersion = latestMachine.ObjectMeta.ResourceVersion
+		return nil
+	}
+
+	return fmt.Errorf("failed to update Machine status after %d retries", maxRetries)
 }
 
 func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitistackv1alpha1.Machine) (ctrl.Result, error) {

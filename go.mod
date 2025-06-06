@@ -7,7 +7,7 @@ godebug default=go1.24
 require (
 	github.com/onsi/ginkgo/v2 v2.23.4
 	github.com/onsi/gomega v1.37.0
-	github.com/vitistack/crds v0.0.1-alpha04
+	github.com/vitistack/crds v0.0.1-alpha09
 	k8s.io/apimachinery v0.33.1
 	k8s.io/client-go v0.33.1
 	kubevirt.io/api v1.5.1
