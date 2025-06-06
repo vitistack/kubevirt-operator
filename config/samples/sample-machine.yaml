@@ -1,0 +1,7 @@
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: sample-machine
+  namespace: default
+spec:
+  name: "test-vm"

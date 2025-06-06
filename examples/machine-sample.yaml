@@ -1,0 +1,39 @@
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-machine
+  namespace: default
+spec:
+  # Using the new instanceType field from v0.0.1-alpha05 CRD
+  instanceType: "medium"
+  name: "example-vm"
+
+  # Optional: Override default resources for medium type
+  memory: 3221225472 # 3 GB in bytes
+  cpu:
+    cores: 3
+
+  # Additional fields can be added as needed
+  # The controller will use simple defaults and these overrides
+
+---
+# apiVersion: vitistack.io/v1alpha1
+# kind: Machine
+# metadata:
+#   name: small-machine
+#   namespace: default
+# spec:
+#   # Using predefined small machine type
+#   instanceType: "small"
+#   # No resource overrides - will use defaults (1 GB RAM, 1 CPU)
+
+# ---
+# apiVersion: vitistack.io/v1alpha1
+# kind: Machine
+# metadata:
+#   name: large-machine
+#   namespace: default
+# spec:
+#   # Using predefined large machine type
+#   instanceType: "large"
+#   # Will use defaults (4 GB RAM, 4 CPUs)

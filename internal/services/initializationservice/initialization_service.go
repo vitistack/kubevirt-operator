@@ -45,9 +45,14 @@ func CheckCRDs() {
 			"VirtualMachine",
 		})
 
-		// Check CRDs for kubevirt.io/v1alpha3
+		// Check CRDs for pool.kubevirt.io/v1alpha1
 		errors = checkGroupVersionCRDs(errors, "pool.kubevirt.io/v1alpha1", []string{
 			"VirtualMachinePool",
+		})
+
+		// Check CRDs for vitistack.io/v1alpha1 (custom Machine CRD)
+		errors = checkGroupVersionCRDs(errors, "vitistack.io/v1alpha1", []string{
+			"Machine",
 		})
 	}
 
