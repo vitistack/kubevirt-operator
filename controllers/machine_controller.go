@@ -1,7 +1,11 @@
 /*
 Copyright 2025.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+Licensed under the Apache License,func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	log := log.FromContext(ctx)
+
+	// Fetch the Machine instance
+	machine := &vitistackv1alpha1.Machine{}ion 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
@@ -32,7 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/vitistack/kubevirt-operator/api/v1alpha1"
+	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 )
 
@@ -56,7 +60,7 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	logger := log.FromContext(ctx)
 
 	// Fetch the Machine instance
-	machine := &v1alpha1.Machine{}
+	machine := &vitistackv1alpha1.Machine{}
 	err := r.Get(ctx, req.NamespacedName, machine)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -111,7 +115,7 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return r.updateMachineStatusFromVM(ctx, machine, vm)
 }
 
-func (r *MachineReconciler) createVirtualMachine(ctx context.Context, machine *v1alpha1.Machine) (*kubevirtv1.VirtualMachine, error) {
+func (r *MachineReconciler) createVirtualMachine(ctx context.Context, machine *vitistackv1alpha1.Machine) (*kubevirtv1.VirtualMachine, error) {
 	logger := log.FromContext(ctx)
 
 	vmName := fmt.Sprintf("vm-%s", machine.Name)
@@ -195,7 +199,7 @@ func (r *MachineReconciler) createVirtualMachine(ctx context.Context, machine *v
 	return vm, nil
 }
 
-func (r *MachineReconciler) updateMachineStatusFromVM(ctx context.Context, machine *v1alpha1.Machine, vm *kubevirtv1.VirtualMachine) (ctrl.Result, error) {
+func (r *MachineReconciler) updateMachineStatusFromVM(ctx context.Context, machine *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	// Determine status based on VirtualMachine state
@@ -229,7 +233,7 @@ func (r *MachineReconciler) updateMachineStatusFromVM(ctx context.Context, machi
 	return ctrl.Result{}, nil
 }
 
-func (r *MachineReconciler) updateMachineStatus(ctx context.Context, machine *v1alpha1.Machine, status, state string) error {
+func (r *MachineReconciler) updateMachineStatus(ctx context.Context, machine *vitistackv1alpha1.Machine, status, state string) error {
 	machine.Status.Status = status
 	machine.Status.State = state
 	machine.Status.LastUpdated = metav1.Now()
@@ -238,7 +242,7 @@ func (r *MachineReconciler) updateMachineStatus(ctx context.Context, machine *v1
 	return r.Status().Update(ctx, machine)
 }
 
-func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *v1alpha1.Machine) (ctrl.Result, error) {
+func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitistackv1alpha1.Machine) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	if controllerutil.ContainsFinalizer(machine, MachineFinalizer) {
@@ -277,7 +281,7 @@ func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *v1alpha
 // SetupWithManager sets up the controller with the Manager.
 func (r *MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.Machine{}).
+		For(&vitistackv1alpha1.Machine{}).
 		Owns(&kubevirtv1.VirtualMachine{}).
 		Complete(r)
 }

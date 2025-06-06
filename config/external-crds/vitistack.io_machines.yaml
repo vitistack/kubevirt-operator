@@ -1,0 +1,171 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: machines.vitistack.io
+spec:
+  group: vitistack.io
+  names:
+    kind: Machine
+    listKind: MachineList
+    plural: machines
+    shortNames:
+    - m
+    singular: machine
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Machine is the Schema for the Machines API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              name:
+                description: The name of the machine
+                type: string
+              type:
+                description: The type of the machine
+                type: string
+            required:
+            - name
+            - type
+            type: object
+          status:
+            properties:
+              architecture:
+                description: Thme machine's cpu architecture
+                type: string
+              cpus:
+                description: the machine's cpus
+                type: integer
+              disks:
+                description: The machine's disk size in bytes
+                items:
+                  properties:
+                    filesystemType:
+                      description: The disk's filesystem type (e.g., ext4, xfs)
+                      type: string
+                    label:
+                      description: The disk's label
+                      type: string
+                    mountPoint:
+                      description: The disk's mount point
+                      type: string
+                    name:
+                      description: The disk's name
+                      type: string
+                    size:
+                      description: The disk's size in bytes
+                      format: int64
+                      type: integer
+                    type:
+                      description: The disk's type (e.g., SSD, HDD)
+                      type: string
+                    uuid:
+                      description: The disk's UUID
+                      type: string
+                  required:
+                  - filesystemType
+                  - label
+                  - mountPoint
+                  - name
+                  - size
+                  - type
+                  - uuid
+                  type: object
+                type: array
+              hostname:
+                description: The machine's hostname
+                type: string
+              ipAddress:
+                description: The IP address of the machine
+                items:
+                  type: string
+                type: array
+              ipv6Address:
+                items:
+                  type: string
+                type: array
+              kernelVersion:
+                description: The machine's kernel version
+                type: string
+              lastUpdated:
+                description: The last time the machine status was updated
+                format: date-time
+                type: string
+              machineID:
+                description: The unique identifier for the machine
+                type: string
+              memory:
+                description: The machine's memory in bytes
+                format: int64
+                type: integer
+              operatingSystem:
+                description: The machine's operating system
+                type: string
+              operatingSystemVersion:
+                description: The machine's operating system version
+                type: string
+              provider:
+                description: The provider of the machine
+                type: string
+              region:
+                description: The region where the machine is located
+                type: string
+              state:
+                description: The current state of the machine
+                type: string
+              status:
+                description: The current status of the machine
+                type: string
+              systemdID:
+                description: systemd identifier for the machine
+                type: string
+              zone:
+                description: The zone where the machine is located
+                type: string
+            required:
+            - architecture
+            - cpus
+            - disks
+            - hostname
+            - ipAddress
+            - ipv6Address
+            - kernelVersion
+            - lastUpdated
+            - machineID
+            - memory
+            - operatingSystem
+            - operatingSystemVersion
+            - provider
+            - region
+            - state
+            - status
+            - systemdID
+            - zone
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

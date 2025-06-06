@@ -6,9 +6,3 @@ metadata:
 spec:
   name: "test-vm"
   type: "virtual"
-status:
-  machineID: "vm-001"
-  state: "running"
-  status: "active"
-  cpus: 2
-  memory: 2147483648

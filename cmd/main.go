@@ -28,7 +28,7 @@ import (
 	"github.com/vitistack/kubevirt-operator/pkg/clients"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
-	"github.com/vitistack/kubevirt-operator/api/v1alpha1"
+	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/controllers"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -66,7 +66,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(v1alpha1.AddToScheme(scheme))
+	utilruntime.Must(vitistackv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(kubevirtv1.AddToScheme(scheme))
 
 	// +kubebuilder:scaffold:scheme
