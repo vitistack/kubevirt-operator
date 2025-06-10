@@ -30,6 +30,9 @@ jobs:
         run: |
           git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
           git config --global --add safe.directory '*'
+          # Create .netrc for Go module authentication
+          echo "machine github.com login ${{ secrets.GITHUB_TOKEN }}" > ~/.netrc
+          chmod 600 ~/.netrc
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -49,6 +52,8 @@ jobs:
           go mod download
         env:
           GOPRIVATE: github.com/vitistack/*
+          GONOPROXY: github.com/vitistack/*
+          GONOSUMDB: github.com/vitistack/*
           GOPROXY: direct
           GIT_TERMINAL_PROMPT: 0
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -78,6 +83,9 @@ jobs:
         run: |
           git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
           git config --global --add safe.directory '*'
+          # Create .netrc for Go module authentication
+          echo "machine github.com login ${{ secrets.GITHUB_TOKEN }}" > ~/.netrc
+          chmod 600 ~/.netrc
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -97,6 +105,8 @@ jobs:
           go mod download
         env:
           GOPRIVATE: github.com/vitistack/*
+          GONOPROXY: github.com/vitistack/*
+          GONOSUMDB: github.com/vitistack/*
           GOPROXY: direct
           GIT_TERMINAL_PROMPT: 0
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -143,6 +153,9 @@ jobs:
         run: |
           git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
           git config --global --add safe.directory '*'
+          # Create .netrc for Go module authentication
+          echo "machine github.com login ${{ secrets.GITHUB_TOKEN }}" > ~/.netrc
+          chmod 600 ~/.netrc
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -162,6 +175,8 @@ jobs:
           go mod download
         env:
           GOPRIVATE: github.com/vitistack/*
+          GONOPROXY: github.com/vitistack/*
+          GONOSUMDB: github.com/vitistack/*
           GOPROXY: direct
           GIT_TERMINAL_PROMPT: 0
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
