@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: ["main", "master"]
 
+permissions:
+  contents: read
+  packages: read
+
 # Global caches that can be used across workflow runs
 jobs:
   build:
@@ -26,6 +30,8 @@ jobs:
         run: |
           git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
           git config --global --add safe.directory '*'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Cache bin folder with tools and binaries
       - name: Cache bin folder
@@ -45,6 +51,7 @@ jobs:
           GOPRIVATE: github.com/vitistack/*
           GOPROXY: direct
           GIT_TERMINAL_PROMPT: 0
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build
         run: |
@@ -71,6 +78,8 @@ jobs:
         run: |
           git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
           git config --global --add safe.directory '*'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Cache bin folder with tools and binaries
       - name: Cache bin folder
@@ -90,6 +99,7 @@ jobs:
           GOPRIVATE: github.com/vitistack/*
           GOPROXY: direct
           GIT_TERMINAL_PROMPT: 0
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup test environment
         run: |
@@ -133,6 +143,8 @@ jobs:
         run: |
           git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
           git config --global --add safe.directory '*'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Cache bin folder with tools and binaries
       - name: Cache bin folder
@@ -152,6 +164,7 @@ jobs:
           GOPRIVATE: github.com/vitistack/*
           GOPROXY: direct
           GIT_TERMINAL_PROMPT: 0
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run security scan
         run: |
@@ -163,3 +176,4 @@ jobs:
         env:
           GOPRIVATE: github.com/vitistack/*
           GOPROXY: direct
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
