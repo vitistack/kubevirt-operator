@@ -126,7 +126,7 @@ jobs:
     # Run in parallel with build job
     steps:
       - name: Checkout code
-        uses: actions/checkout@
+        uses: actions/checkout@v4
 
       - name: Configure Git for private repos
         run: |
