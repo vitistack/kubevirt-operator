@@ -28,7 +28,9 @@ jobs:
 
       - name: Configure Git for private repos
         run: |
+          # Configure Git to use HTTPS with token for both HTTPS and SSH URLs
           git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git@github.com:"
           git config --global --add safe.directory '*'
           # Create .netrc for Go module authentication
           echo "machine github.com login ${{ secrets.GITHUB_TOKEN }}" > ~/.netrc
@@ -51,9 +53,7 @@ jobs:
           go clean -modcache || true
           go mod download
         env:
-          GOPRIVATE: github.com/vitistack/*
-          GONOPROXY: github.com/vitistack/*
-          GONOSUMDB: github.com/vitistack/*
+          GOPRIVATE: github.com/vitistack
           GOPROXY: direct
           GIT_TERMINAL_PROMPT: 0
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -81,7 +81,9 @@ jobs:
 
       - name: Configure Git for private repos
         run: |
+          # Configure Git to use HTTPS with token for both HTTPS and SSH URLs
           git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git@github.com:"
           git config --global --add safe.directory '*'
           # Create .netrc for Go module authentication
           echo "machine github.com login ${{ secrets.GITHUB_TOKEN }}" > ~/.netrc
@@ -104,9 +106,7 @@ jobs:
           go clean -modcache || true
           go mod download
         env:
-          GOPRIVATE: github.com/vitistack/*
-          GONOPROXY: github.com/vitistack/*
-          GONOSUMDB: github.com/vitistack/*
+          GOPRIVATE: github.com/vitistack
           GOPROXY: direct
           GIT_TERMINAL_PROMPT: 0
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -151,7 +151,9 @@ jobs:
 
       - name: Configure Git for private repos
         run: |
+          # Configure Git to use HTTPS with token for both HTTPS and SSH URLs
           git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git@github.com:"
           git config --global --add safe.directory '*'
           # Create .netrc for Go module authentication
           echo "machine github.com login ${{ secrets.GITHUB_TOKEN }}" > ~/.netrc
@@ -174,9 +176,7 @@ jobs:
           go clean -modcache || true
           go mod download
         env:
-          GOPRIVATE: github.com/vitistack/*
-          GONOPROXY: github.com/vitistack/*
-          GONOSUMDB: github.com/vitistack/*
+          GOPRIVATE: github.com/vitistack
           GOPROXY: direct
           GIT_TERMINAL_PROMPT: 0
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -189,6 +189,6 @@ jobs:
           fi
           govulncheck ./...
         env:
-          GOPRIVATE: github.com/vitistack/*
+          GOPRIVATE: github.com/vitistack
           GOPROXY: direct
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

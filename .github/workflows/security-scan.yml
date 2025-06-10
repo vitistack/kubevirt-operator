@@ -21,10 +21,11 @@ jobs:
       - name: Configure Git for private repos
         run: |
           git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git@github.com:"
 
       - name: Run security scan
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
         env:
-          GOPRIVATE: github.com/vitistack/*
+          GOPRIVATE: github.com/vitistack
