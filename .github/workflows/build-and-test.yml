@@ -15,9 +15,17 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: github.com/vitistack
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Configure Git for private repos
+        run: |
+          run: git config --global url.https://$GH_TOKEN@github.com/.insteadOf https://github.com/
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -25,18 +33,6 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
-
-      - name: Configure Git for private repos
-        run: |
-          # Configure Git to use HTTPS with token for both HTTPS and SSH URLs
-          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
-          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git@github.com:"
-          git config --global --add safe.directory '*'
-          # Create .netrc for Go module authentication
-          echo "machine github.com login ${{ secrets.GITHUB_TOKEN }}" > ~/.netrc
-          chmod 600 ~/.netrc
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Cache bin folder with tools and binaries
       - name: Cache bin folder
@@ -49,8 +45,6 @@ jobs:
 
       - name: Install dependencies
         run: |
-          # Clear any existing mod cache that might have auth issues
-          go clean -modcache || true
           go mod download
         env:
           GOPRIVATE: github.com/vitistack
@@ -65,9 +59,16 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: github.com/vitistack
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Configure Git for private repos
+        run: |
+          run: git config --global url.https://$GH_TOKEN@github.com/.insteadOf https://github.com/
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -75,18 +76,6 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
-
-      - name: Configure Git for private repos
-        run: |
-          # Configure Git to use HTTPS with token for both HTTPS and SSH URLs
-          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
-          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git@github.com:"
-          git config --global --add safe.directory '*'
-          # Create .netrc for Go module authentication
-          echo "machine github.com login ${{ secrets.GITHUB_TOKEN }}" > ~/.netrc
-          chmod 600 ~/.netrc
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Cache bin folder with tools and binaries
       - name: Cache bin folder
@@ -131,10 +120,17 @@ jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: github.com/vitistack
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
     # Run in parallel with build job
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@
+
+      - name: Configure Git for private repos
+        run: |
+          run: git config --global url.https://$GH_TOKEN@github.com/.insteadOf https://github.com/
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -142,18 +138,6 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
-
-      - name: Configure Git for private repos
-        run: |
-          # Configure Git to use HTTPS with token for both HTTPS and SSH URLs
-          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
-          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "git@github.com:"
-          git config --global --add safe.directory '*'
-          # Create .netrc for Go module authentication
-          echo "machine github.com login ${{ secrets.GITHUB_TOKEN }}" > ~/.netrc
-          chmod 600 ~/.netrc
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Cache bin folder with tools and binaries
       - name: Cache bin folder
