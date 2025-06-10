@@ -22,7 +22,7 @@ jobs:
 
       - name: Configure Git for private repos
         run: |
-          run: git config --global url.https://$GH_TOKEN@github.com/.insteadOf https://github.com/
+          git config --global url.https://$GH_TOKEN@github.com/.insteadOf https://github.com/
 
       - name: Setup Go
         uses: actions/setup-go@v5
