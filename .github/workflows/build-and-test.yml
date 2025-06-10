@@ -25,6 +25,7 @@ jobs:
       - name: Configure Git for private repos
         run: |
           git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          git config --global --add safe.directory '*'
 
       # Cache bin folder with tools and binaries
       - name: Cache bin folder
@@ -37,10 +38,13 @@ jobs:
 
       - name: Install dependencies
         run: |
+          # Clear any existing mod cache that might have auth issues
+          go clean -modcache || true
           go mod download
         env:
           GOPRIVATE: github.com/vitistack/*
           GOPROXY: direct
+          GIT_TERMINAL_PROMPT: 0
 
       - name: Build
         run: |
@@ -66,6 +70,7 @@ jobs:
       - name: Configure Git for private repos
         run: |
           git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          git config --global --add safe.directory '*'
 
       # Cache bin folder with tools and binaries
       - name: Cache bin folder
@@ -78,10 +83,13 @@ jobs:
 
       - name: Install dependencies
         run: |
+          # Clear any existing mod cache that might have auth issues
+          go clean -modcache || true
           go mod download
         env:
           GOPRIVATE: github.com/vitistack/*
           GOPROXY: direct
+          GIT_TERMINAL_PROMPT: 0
 
       - name: Setup test environment
         run: |
@@ -124,6 +132,7 @@ jobs:
       - name: Configure Git for private repos
         run: |
           git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          git config --global --add safe.directory '*'
 
       # Cache bin folder with tools and binaries
       - name: Cache bin folder
@@ -136,10 +145,13 @@ jobs:
 
       - name: Install dependencies
         run: |
+          # Clear any existing mod cache that might have auth issues
+          go clean -modcache || true
           go mod download
         env:
           GOPRIVATE: github.com/vitistack/*
           GOPROXY: direct
+          GIT_TERMINAL_PROMPT: 0
 
       - name: Run security scan
         run: |
