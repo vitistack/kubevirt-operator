@@ -28,3 +28,4 @@ go.work
 __debug_bin*
 
 dist/
+hack/crds

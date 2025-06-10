@@ -92,6 +92,21 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 lint-config: golangci-lint ## Verify golangci-lint linter configuration
 	$(GOLANGCI_LINT) config verify
 
+##@ Dependencies
+
+deps: ## Download and verify dependencies
+	@echo "Downloading dependencies..."
+	@go mod download
+	@go mod verify
+	@go mod tidy
+	@echo "Dependencies updated!"
+
+update-deps: ## Update dependencies
+	@echo "Updating dependencies..."
+	@go get -u ./...
+	@go mod tidy
+	@echo "Dependencies updated!"
+
 ##@ Build
 
 .PHONY: build-setup
@@ -162,6 +177,7 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
 
+##@ KubeVirt Operator Installation
 KUBEVIRTNAMESPACE := kubevirt
 .PHONY: install-kubevirt
 install-kubevirt: ## Install KubeVirt operator and CRDs into the K8s cluster specified in ~/.kube/config.
@@ -215,20 +231,51 @@ install-kubevirt-containerized-data-importer: ## Install KubeVirt CDI operator a
 	$(KUBECTL) create -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-operator.yaml
 	$(KUBECTL) create -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-cr.yaml
 
-##@ Dependencies
+.PHONY: uninstall-kubevirt-containerized-data-importer
+uninstall-kubevirt-containerized-data-importer: ## Install KubeVirt CDI operator and CRDs into the K8s cluster specified in ~/.kube/config.
+	@echo "Uninstalling KubeVirt Containerized data importer operator and CRDs..."
+	$(eval VERSION=$(shell curl -s https://api.github.com/repos/kubevirt/containerized-data-importer/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'))
+	@echo "Using CDI version: $(VERSION)"
+	$(KUBECTL) delete -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-operator.yaml
+	$(KUBECTL) delete -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-cr.yaml
 
-deps: ## Download and verify dependencies
-	@echo "Downloading dependencies..."
-	@go mod download
-	@go mod verify
-	@go mod tidy
-	@echo "Dependencies updated!"
+##@ CRDs & Resources
+.PHONY: install-crds download-crds uninstall
 
-update-deps: ## Update dependencies
-	@echo "Updating dependencies..."
-	@go get -u ./...
-	@go mod tidy
-	@echo "Dependencies updated!"
+install-viti-crds: ## Install CRDs into a cluster
+	@echo "${GREEN}Installing CRDs...${RESET}"
+	${KUBECTL} apply -f hack/crds/
+
+download-viti-crds: ## Download CRDs from private repository (requires GITHUB_TOKEN)
+	@echo "${GREEN}Downloading CRDs from private repository...${RESET}"
+	@if [ -z "$$GITHUB_TOKEN" ]; then \
+		echo "${RED}Error: GITHUB_TOKEN environment variable is required for private repository access${RESET}"; \
+		exit 1; \
+	fi
+	@mkdir -p hack/crds
+	@curl -H "Authorization: token $$GITHUB_TOKEN" \
+		-H "Accept: application/vnd.github.v3.raw" \
+		-o hack/crds/vitistack.io_datacenters.yaml \
+		https://api.github.com/repos/vitistack/crds/contents/crds/vitistack.io_datacenters.yaml
+	@curl -H "Authorization: token $$GITHUB_TOKEN" \
+		-H "Accept: application/vnd.github.v3.raw" \
+		-o hack/crds/vitistack.io_kubernetesproviders.yaml \
+		https://api.github.com/repos/vitistack/crds/contents/crds/vitistack.io_kubernetesproviders.yaml
+	@curl -H "Authorization: token $$GITHUB_TOKEN" \
+		-H "Accept: application/vnd.github.v3.raw" \
+		-o hack/crds/vitistack.io_machineproviders.yaml \
+		https://api.github.com/repos/vitistack/crds/contents/crds/vitistack.io_machineproviders.yaml
+	@curl -H "Authorization: token $$GITHUB_TOKEN" \
+		-H "Accept: application/vnd.github.v3.raw" \
+		-o hack/crds/vitistack.io_machines.yaml \
+		https://api.github.com/repos/vitistack/crds/contents/crds/vitistack.io_machines.yaml
+	@echo "${GREEN}CRDs downloaded successfully${RESET}"
+
+uninstall-viti-crds: check-kubectl ## Uninstall CRDs into a cluster
+	@echo "${RED}Uninstalling CRDs...${RESET}"
+	${KUBECTL} delete -f hack/crds/
+
+##@ Kubebuilder
 
 ## Location to install dependencies to
 LOCALBIN ?= $(shell pwd)/bin
