@@ -32,7 +32,6 @@ jobs:
           go mod download
         env:
           GOPRIVATE: github.com/vitistack
-          GOPROXY: direct
 
       - name: Build
         run: |

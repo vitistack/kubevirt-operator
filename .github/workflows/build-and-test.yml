@@ -54,9 +54,6 @@ jobs:
           go mod download
         env:
           GOPRIVATE: github.com/vitistack
-          GOPROXY: direct
-          GIT_TERMINAL_PROMPT: 0
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build
         run: |
@@ -107,9 +104,6 @@ jobs:
           go mod download
         env:
           GOPRIVATE: github.com/vitistack
-          GOPROXY: direct
-          GIT_TERMINAL_PROMPT: 0
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup test environment
         run: |
@@ -190,5 +184,3 @@ jobs:
           govulncheck ./...
         env:
           GOPRIVATE: github.com/vitistack
-          GOPROXY: direct
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
