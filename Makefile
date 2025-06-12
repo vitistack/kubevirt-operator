@@ -123,9 +123,24 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
+
+# NOTE: This project has dependencies on private repositories. Use docker-build-with-token or 
+# docker-build-with-ssh for building with private repository access.
 .PHONY: docker-build
-docker-build: ## Build docker image with the manager.
+docker-build: ## Build docker image with the manager (may fail with private dependencies).
 	$(CONTAINER_TOOL) build -t ${IMG} .
+
+.PHONY: docker-build-with-token
+docker-build-with-token: ## Build docker image with the manager using GitHub token for private repositories.
+	@if [ -z "$$GITHUB_TOKEN" ]; then \
+		echo "Error: GITHUB_TOKEN environment variable is required for private repository access"; \
+		exit 1; \
+	fi
+	$(CONTAINER_TOOL) build --build-arg GITHUB_TOKEN=$$GITHUB_TOKEN -t ${IMG} -f Dockerfile.token .
+
+.PHONY: docker-build-with-ssh
+docker-build-with-ssh: ## Build docker image with the manager using SSH for private repositories.
+	DOCKER_BUILDKIT=1 $(CONTAINER_TOOL) build --ssh default -t ${IMG} -f Dockerfile.buildx .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -136,17 +151,47 @@ docker-push: ## Push docker image with the manager.
 # - be able to use docker buildx. More info: https://docs.docker.com/build/buildx/
 # - have enabled BuildKit. More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 # - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
+# - have SSH access to private repositories configured (for docker-buildx) OR GitHub token (for docker-buildx-with-token)
 # To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
 PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
 .PHONY: docker-buildx
-docker-buildx: ## Build and push docker image for the manager for cross-platform support
-	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
-	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
+docker-buildx: ## Build and push docker image for the manager for cross-platform support (requires SSH access to private repos)
+	# copy existing Dockerfile.buildx and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile.buildx
+	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile.buildx > Dockerfile.cross
 	- $(CONTAINER_TOOL) buildx create --name kubevirt-operator-builder
 	$(CONTAINER_TOOL) buildx use kubevirt-operator-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
+	- $(CONTAINER_TOOL) buildx build --ssh default --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
 	- $(CONTAINER_TOOL) buildx rm kubevirt-operator-builder
 	rm Dockerfile.cross
+
+.PHONY: docker-buildx-with-token
+docker-buildx-with-token: ## Build and push docker image for the manager for cross-platform support using GitHub token
+	@if [ -z "$$GITHUB_TOKEN" ]; then \
+		echo "Error: GITHUB_TOKEN environment variable is required for private repository access"; \
+		exit 1; \
+	fi
+	# copy existing Dockerfile.token and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile.token
+	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile.token > Dockerfile.cross
+	- $(CONTAINER_TOOL) buildx create --name kubevirt-operator-builder
+	$(CONTAINER_TOOL) buildx use kubevirt-operator-builder
+	- $(CONTAINER_TOOL) buildx build --build-arg GITHUB_TOKEN=$$GITHUB_TOKEN --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
+	- $(CONTAINER_TOOL) buildx rm kubevirt-operator-builder
+	rm Dockerfile.cross
+
+.PHONY: test-build
+test-build: ## Test that the Docker build works (tries SSH first, then token)
+	@echo "Testing Docker build with private repository access..."
+	@if ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then \
+		echo "Using SSH authentication..."; \
+		$(MAKE) docker-build-with-ssh; \
+	elif [ -n "$$GITHUB_TOKEN" ]; then \
+		echo "Using token authentication..."; \
+		$(MAKE) docker-build-with-token; \
+	else \
+		echo "Error: Neither SSH nor GITHUB_TOKEN authentication is available."; \
+		echo "Run 'make setup-build-env' for setup instructions."; \
+		exit 1; \
+	fi
 
 .PHONY: build-installer
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
@@ -269,6 +314,10 @@ download-viti-crds: ## Download CRDs from private repository (requires GITHUB_TO
 		-H "Accept: application/vnd.github.v3.raw" \
 		-o hack/crds/vitistack.io_machines.yaml \
 		https://api.github.com/repos/vitistack/crds/contents/crds/vitistack.io_machines.yaml
+	@curl -H "Authorization: token $$GITHUB_TOKEN" \
+		-H "Accept: application/vnd.github.v3.raw" \
+		-o hack/crds/vitistack.io_kubernetescluster.yaml \
+		https://api.github.com/repos/vitistack/crds/contents/crds/vitistack.io_kubernetescluster.yaml
 	@echo "${GREEN}CRDs downloaded successfully${RESET}"
 
 uninstall-viti-crds: check-kubectl ## Uninstall CRDs into a cluster

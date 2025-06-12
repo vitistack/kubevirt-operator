@@ -240,6 +240,12 @@ func (r *MachineReconciler) updateMachineStatusFromVM(ctx context.Context, machi
 		requeue = true
 	}
 
+	machine.Status.Phase = string(vm.Status.PrintableStatus)
+	machine.Status.State = string(vm.Status.PrintableStatus)
+	machine.Status.Provider = "kubevirt"
+
+	// todo fetch datacenter region and zone
+
 	// Update machine status
 	if err := r.updateMachineStatus(ctx, machine, state); err != nil {
 		logger.Error(err, "Failed to update Machine status")
@@ -272,6 +278,7 @@ func (r *MachineReconciler) updateMachineStatus(ctx context.Context, machine *vi
 
 		// Update the status fields - only use fields that exist in the external CRD
 		latestMachine.Status.State = state
+		latestMachine.Status.Phase = state
 		latestMachine.Status.LastUpdated = metav1.Now()
 		latestMachine.Status.Provider = "kubevirt"
 

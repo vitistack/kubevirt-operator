@@ -1,16 +1,17 @@
 module github.com/vitistack/kubevirt-operator
 
-go 1.24.3
+go 1.24.4
 
 godebug default=go1.24
 
 require (
+	github.com/NorskHelsenett/ror v1.2.0-rc11
 	github.com/onsi/ginkgo/v2 v2.23.4
 	github.com/onsi/gomega v1.37.0
-	github.com/vitistack/crds v0.0.1-alpha09
+	github.com/vitistack/crds v0.0.1-alpha10
 	k8s.io/apimachinery v0.33.1
 	k8s.io/client-go v0.33.1
-	kubevirt.io/api v1.5.1
+	kubevirt.io/api v1.5.2
 	sigs.k8s.io/controller-runtime v0.21.0
 )
 
@@ -30,6 +31,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
 	github.com/openshift/custom-resource-status v1.1.2 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/sagikazarmark/locafero v0.9.0 // indirect
@@ -40,6 +42,7 @@ require (
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.14 // indirect
+	go.mongodb.org/mongo-driver v1.17.4 // indirect
 	golang.org/x/arch v0.18.0 // indirect
 	golang.org/x/crypto v0.39.0 // indirect
 	kubevirt.io/containerized-data-importer-api v1.62.0 // indirect
@@ -48,7 +51,6 @@ require (
 
 require (
 	cel.dev/expr v0.24.0 // indirect
-	github.com/NorskHelsenett/ror v1.1.4
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
@@ -124,7 +126,7 @@ require (
 	k8s.io/apiserver v0.33.1 // indirect
 	k8s.io/component-base v0.33.1 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
-	k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff // indirect
+	k8s.io/kube-openapi v0.0.0-20250610211856-8b98d1ed966a // indirect
 	k8s.io/utils v0.0.0-20250604170112-4c0f3b243397 // indirect
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.33.0 // indirect
 	sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 // indirect
