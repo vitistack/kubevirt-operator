@@ -36,4 +36,4 @@ scripts/
 # Ignore Docker files not being used
 Dockerfile.*
 !Dockerfile.buildx
-!Dockerfile.token
+!Dockerfile.secrets

@@ -2,6 +2,25 @@
 
 Kubevirt operator for creating virtual machines
 
+## Quick Start
+
+### Building Locally
+
+This project has dependencies on private repositories. To build locally:
+
+```bash
+# Using SSH (recommended)
+make docker-build-with-ssh
+
+# Using Docker secrets (secure token method)
+export GITHUB_TOKEN=your_token_here
+make docker-build-with-secrets
+
+# Using build args (legacy token method)
+export GITHUB_TOKEN=your_token_here
+make docker-build-with-token
+```
+
 # Documentation
 
 Using https://kubebuilder.io and https://kubevirt.io/user-guide/

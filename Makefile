@@ -39,6 +39,13 @@ all: build
 help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
+.PHONY: clean-build-files
+clean-build-files: ## Clean up temporary build files
+	@echo "Cleaning up temporary build files..."
+	@rm -f $(PWD)/.github-token
+	@rm -f Dockerfile.cross
+	@echo "✅ Build files cleaned"
+
 ##@ Development
 
 .PHONY: manifests
@@ -130,17 +137,16 @@ run: manifests generate fmt vet ## Run a controller from your host.
 docker-build: ## Build docker image with the manager (may fail with private dependencies).
 	$(CONTAINER_TOOL) build -t ${IMG} .
 
-.PHONY: docker-build-with-token
-docker-build-with-token: ## Build docker image with the manager using GitHub token for private repositories.
+.PHONY: docker-build-with-github-token
+docker-build-with-github-token: ## Build docker image with the manager using Docker secrets for GitHub token.
 	@if [ -z "$$GITHUB_TOKEN" ]; then \
 		echo "Error: GITHUB_TOKEN environment variable is required for private repository access"; \
 		exit 1; \
 	fi
-	$(CONTAINER_TOOL) build --build-arg GITHUB_TOKEN=$$GITHUB_TOKEN -t ${IMG} -f Dockerfile.token .
-
-.PHONY: docker-build-with-ssh
-docker-build-with-ssh: ## Build docker image with the manager using SSH for private repositories.
-	DOCKER_BUILDKIT=1 $(CONTAINER_TOOL) build --ssh default -t ${IMG} -f Dockerfile.buildx .
+	@echo "$$GITHUB_TOKEN" > $(PWD)/.github-token
+	@chmod 600 $(PWD)/.github-token
+	DOCKER_BUILDKIT=1 $(CONTAINER_TOOL) build --secret id=github_token,src=$(PWD)/.github-token -t ${IMG} -f Dockerfile.secrets .
+	@rm -f $(PWD)/.github-token
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -164,29 +170,29 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 	- $(CONTAINER_TOOL) buildx rm kubevirt-operator-builder
 	rm Dockerfile.cross
 
-.PHONY: docker-buildx-with-token
-docker-buildx-with-token: ## Build and push docker image for the manager for cross-platform support using GitHub token
+.PHONY: docker-buildx-with-github-token
+docker-buildx-with-github-token: ## Build and push docker image for the manager for cross-platform support using GitHub token
 	@if [ -z "$$GITHUB_TOKEN" ]; then \
 		echo "Error: GITHUB_TOKEN environment variable is required for private repository access"; \
 		exit 1; \
 	fi
-	# copy existing Dockerfile.token and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile.token
-	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile.token > Dockerfile.cross
+	# copy existing Dockerfile.secrets and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile.secrets
+	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile.secrets > Dockerfile.cross
 	- $(CONTAINER_TOOL) buildx create --name kubevirt-operator-builder
 	$(CONTAINER_TOOL) buildx use kubevirt-operator-builder
-	- $(CONTAINER_TOOL) buildx build --build-arg GITHUB_TOKEN=$$GITHUB_TOKEN --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
+	- echo "$$GITHUB_TOKEN" | $(CONTAINER_TOOL) buildx build --secret id=github_token,src=- --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
 	- $(CONTAINER_TOOL) buildx rm kubevirt-operator-builder
 	rm Dockerfile.cross
 
 .PHONY: test-build
-test-build: ## Test that the Docker build works (tries SSH first, then token)
+test-build: ## Test that the Docker build works (tries SSH first, then secrets)
 	@echo "Testing Docker build with private repository access..."
 	@if ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then \
 		echo "Using SSH authentication..."; \
 		$(MAKE) docker-build-with-ssh; \
 	elif [ -n "$$GITHUB_TOKEN" ]; then \
-		echo "Using token authentication..."; \
-		$(MAKE) docker-build-with-token; \
+		echo "Using secrets-based token authentication..."; \
+		$(MAKE) docker-build-with-secrets; \
 	else \
 		echo "Error: Neither SSH nor GITHUB_TOKEN authentication is available."; \
 		echo "Run 'make setup-build-env' for setup instructions."; \
