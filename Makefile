@@ -268,8 +268,8 @@ uninstall-kubevirt: ## Uninstall KubeVirt operator and CRDs from the K8s cluster
 	@echo "✅ KubeVirt operator and CRDs uninstalled."
 
 
-.PHONY: patch-kind-for-kubevirt
-patch-kind-for-kubevirt: ## Patch Kind cluster to support KubeVirt.
+.PHONY: kubevirt-emulation-patch
+kubevirt-emulation-patch: ## Patch cluster to support KubeVirt.
 	@echo "Patching Kind cluster to support KubeVirt..."
 	$(KUBECTL) -n kubevirt patch kubevirt kubevirt --type=merge --patch '{"spec":{"configuration":{"developerConfiguration":{"useEmulation":true}}}}'
 	@echo "✅ Kind cluster patched for KubeVirt."
@@ -430,3 +430,23 @@ mv $(1) $(1)-$(3) ;\
 } ;\
 ln -sf $(1)-$(3) $(1)
 endef
+
+
+##@ Kubernetes 
+
+.PHONY: k8s-install-simple-storageclass
+k8s-install-simple-storageclass: ## Install a default storage class for the cluster.
+	@echo "Installing default storage class..."
+	$(eval KUBERNETES_VERSION := $(shell kubectl version --output=json 2>/dev/null | jq -r '.serverVersion.major + "." + .serverVersion.minor' 2>/dev/null || kubectl version --output=yaml 2>/dev/null | grep gitVersion | head -1 | sed 's/.*v\([0-9]*\.[0-9]*\).*/\1/' || echo "1.31"))
+	@if [ -z "$(KUBERNETES_VERSION)" ]; then \
+		echo "Error: KUBERNETES_VERSION could not be determined"; \
+		exit 1; \
+	fi
+	@echo "Detected Kubernetes version: $(KUBERNETES_VERSION)"
+	@if [ "$$(echo "$(KUBERNETES_VERSION) >= 1.31" | bc -l)" -eq 1 ] 2>/dev/null || [ "$$(printf "$(KUBERNETES_VERSION)\n1.31" | sort -V | head -n1)" = "1.31" ]; then \
+		$(KUBECTL) apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/master/deploy/local-path-storage.yaml; \
+		$(KUBECTL) patch storageclass local-path -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'; \
+	else \
+		echo "Kubernetes version $(KUBERNETES_VERSION) is below 1.31, no default storage class will be installed"; \
+	fi
+	@echo "✅ Default storage class installed."

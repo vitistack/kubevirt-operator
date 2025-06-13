@@ -55,6 +55,7 @@ const (
 // +kubebuilder:rbac:groups=vitistack.io,resources=machines/finalizers,verbs=update
 // +kubebuilder:rbac:groups=kubevirt.io,resources=virtualmachines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kubevirt.io,resources=virtualmachines/status,verbs=get
+// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 
 func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -117,10 +118,58 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return r.updateMachineStatusFromVM(ctx, machine, vm)
 }
 
+func (r *MachineReconciler) createPVC(ctx context.Context, machine *vitistackv1alpha1.Machine, pvcName string) (*corev1.PersistentVolumeClaim, error) {
+	logger := log.FromContext(ctx)
+
+	// Default storage size - use a reasonable default since there's no storage field in Machine spec
+	storageSize := "10Gi"
+
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pvcName,
+			Namespace: machine.Namespace,
+			Labels: map[string]string{
+				"managed-by":     "kubevirt-operator",
+				"source-machine": machine.Name,
+			},
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{
+				corev1.ReadWriteOnce,
+			},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse(storageSize),
+				},
+			},
+		},
+	}
+
+	// Set Machine as the owner of the PVC
+	if err := controllerutil.SetControllerReference(machine, pvc, r.Scheme); err != nil {
+		return nil, err
+	}
+
+	if err := r.Create(ctx, pvc); err != nil {
+		return nil, err
+	}
+
+	logger.Info("Successfully created PVC", "pvc", pvc.Name, "size", storageSize)
+	return pvc, nil
+}
+
 func (r *MachineReconciler) createVirtualMachine(ctx context.Context, machine *vitistackv1alpha1.Machine) (*kubevirtv1.VirtualMachine, error) {
 	logger := log.FromContext(ctx)
 
 	vmName := fmt.Sprintf("vm-%s", machine.Name)
+	pvcName := fmt.Sprintf("%s-pvc", vmName)
+
+	// Create PVC first
+	_, err := r.createPVC(ctx, machine, pvcName)
+	if err != nil {
+		logger.Error(err, "Failed to create PVC")
+		return nil, err
+	}
 
 	// Default resource values based on machine spec
 	memoryRequest := "1Gi"
@@ -182,6 +231,10 @@ func (r *MachineReconciler) createVirtualMachine(ctx context.Context, machine *v
 								corev1.ResourceCPU:    resource.MustParse(cpuRequest),
 							},
 						},
+						CPU: &kubevirtv1.CPU{
+							Cores: uint32(machine.Spec.CPU.Cores),
+							Model: "host-passthrough",
+						},
 						Devices: kubevirtv1.Devices{
 							Disks: []kubevirtv1.Disk{
 								{
@@ -199,8 +252,10 @@ func (r *MachineReconciler) createVirtualMachine(ctx context.Context, machine *v
 						{
 							Name: "root",
 							VolumeSource: kubevirtv1.VolumeSource{
-								ContainerDisk: &kubevirtv1.ContainerDiskSource{
-									Image: "quay.io/kubevirt/cirros-container-disk-demo",
+								PersistentVolumeClaim: &kubevirtv1.PersistentVolumeClaimVolumeSource{
+									PersistentVolumeClaimVolumeSource: corev1.PersistentVolumeClaimVolumeSource{
+										ClaimName: pvcName,
+									},
 								},
 							},
 						},
@@ -327,6 +382,27 @@ func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitista
 			return ctrl.Result{}, err
 		}
 
+		// Delete associated PVC
+		pvcName := fmt.Sprintf("%s-pvc", vmName)
+		pvc := &corev1.PersistentVolumeClaim{}
+		pvcNamespacedName := types.NamespacedName{
+			Name:      pvcName,
+			Namespace: machine.Namespace,
+		}
+
+		err = r.Get(ctx, pvcNamespacedName, pvc)
+		if err == nil {
+			// PVC exists, delete it
+			if err := r.Delete(ctx, pvc); err != nil {
+				logger.Error(err, "Failed to delete PVC")
+				return ctrl.Result{}, err
+			}
+			logger.Info("Deleted PVC", "pvc", pvc.Name)
+		} else if !errors.IsNotFound(err) {
+			logger.Error(err, "Failed to get PVC for deletion")
+			return ctrl.Result{}, err
+		}
+
 		// Remove finalizer
 		controllerutil.RemoveFinalizer(machine, MachineFinalizer)
 		if err := r.Update(ctx, machine); err != nil {
@@ -343,5 +419,6 @@ func (r *MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vitistackv1alpha1.Machine{}).
 		Owns(&kubevirtv1.VirtualMachine{}).
+		Owns(&corev1.PersistentVolumeClaim{}).
 		Complete(r)
 }
