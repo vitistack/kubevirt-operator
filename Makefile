@@ -159,7 +159,7 @@ docker-push: ## Push docker image with the manager.
 # - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
 # - have SSH access to private repositories configured (for docker-buildx) OR GitHub token (for docker-buildx-with-token)
 # To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
-PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
+PLATFORMS ?= linux/arm64,linux/amd64#,linux/s390x,linux/ppc64le
 .PHONY: docker-buildx
 docker-buildx: ## Build and push docker image for the manager for cross-platform support (requires SSH access to private repos)
 	# copy existing Dockerfile.buildx and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile.buildx
@@ -227,68 +227,6 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
-
-##@ KubeVirt Operator Installation
-KUBEVIRTNAMESPACE := kubevirt
-.PHONY: install-kubevirt
-install-kubevirt: ## Install KubeVirt operator and CRDs into the K8s cluster specified in ~/.kube/config.
-	@echo "Installing KubeVirt operator and CRDs..."
-	$(eval VERSION=$(shell curl -s https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt))
-	@echo "Using KubeVirt version: $(VERSION)"
-	$(KUBECTL) apply -f https://github.com/kubevirt/kubevirt/releases/download/$(VERSION)/kubevirt-operator.yaml
-	$(KUBECTL) apply -f https://github.com/kubevirt/kubevirt/releases/download/$(VERSION)/kubevirt-cr.yaml
-	
-	@echo "🔄 Waiting for KubeVirt CR to become available..."
-	@RESOURCE_NAME=$$(kubectl get kubevirt -n $(KUBEVIRTNAMESPACE) -o jsonpath="{.items[0].metadata.name}") && \
-	kubectl wait kubevirt $$RESOURCE_NAME --for=condition=Available --timeout=5m -n $(KUBEVIRTNAMESPACE)
-
-	@echo "🔄 Waiting for KubeVirt core components to be ready..."
-	@for component in virt-operator virt-api virt-controller; do \
-		echo "⏳ Waiting for deployment $$component..."; \
-		kubectl rollout status deployment $$component -n $(KUBEVIRTNAMESPACE) || exit 1; \
-	done
-
-	@echo "🔄 Waiting for virt-handler pods to be ready..."
-	@kubectl wait --for=condition=Ready pod -l kubevirt.io=virt-handler -n $(KUBEVIRTNAMESPACE) --timeout=300s
-
-	@echo "✅ KubeVirt is fully deployed and ready."
-
-
-.PHONY: uninstall-kubevirt
-uninstall-kubevirt: ## Uninstall KubeVirt operator and CRDs from the K8s cluster specified in ~/.kube/config.
-	@echo "Uninstalling KubeVirt operator and CRDs..."
-	$(eval VERSION=$(shell curl -s https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt))
-	@echo "Using KubeVirt version: $(VERSION)"
-	@echo "Deleting KubeVirt CRDs..."
-	$(KUBECTL) delete -f https://github.com/kubevirt/kubevirt/releases/download/$(VERSION)/kubevirt-operator.yaml
-	@echo "Deleting KubeVirt operator..."
-	$(KUBECTL) delete -f https://github.com/kubevirt/kubevirt/releases/download/$(VERSION)/kubevirt-cr.yaml
-	@echo "Deleting KubeVirt namespace..."
-	$(KUBECTL) delete namespace $(KUBEVIRTNAMESPACE)
-	@echo "✅ KubeVirt operator and CRDs uninstalled."
-
-
-.PHONY: kubevirt-emulation-patch
-kubevirt-emulation-patch: ## Patch cluster to support KubeVirt.
-	@echo "Patching Kind cluster to support KubeVirt..."
-	$(KUBECTL) -n kubevirt patch kubevirt kubevirt --type=merge --patch '{"spec":{"configuration":{"developerConfiguration":{"useEmulation":true}}}}'
-	@echo "✅ Kind cluster patched for KubeVirt."
-
-.PHONY: install-kubevirt-containerized-data-importer
-install-kubevirt-containerized-data-importer: ## Install KubeVirt CDI operator and CRDs into the K8s cluster specified in ~/.kube/config.
-	@echo "Installing KubeVirt Containerized data importer operator and CRDs..."
-	$(eval VERSION=$(shell curl -s https://api.github.com/repos/kubevirt/containerized-data-importer/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'))
-	@echo "Using CDI version: $(VERSION)"
-	$(KUBECTL) create -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-operator.yaml
-	$(KUBECTL) create -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-cr.yaml
-
-.PHONY: uninstall-kubevirt-containerized-data-importer
-uninstall-kubevirt-containerized-data-importer: ## Install KubeVirt CDI operator and CRDs into the K8s cluster specified in ~/.kube/config.
-	@echo "Uninstalling KubeVirt Containerized data importer operator and CRDs..."
-	$(eval VERSION=$(shell curl -s https://api.github.com/repos/kubevirt/containerized-data-importer/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'))
-	@echo "Using CDI version: $(VERSION)"
-	$(KUBECTL) delete -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-operator.yaml
-	$(KUBECTL) delete -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-cr.yaml
 
 ##@ CRDs & Resources
 .PHONY: install-crds download-crds uninstall
@@ -373,6 +311,7 @@ $(LOCALBIN):
 ## Tool Binaries
 KUBECTL ?= kubectl
 KIND ?= kind
+HELM ?= helm
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
@@ -450,3 +389,71 @@ k8s-install-simple-storageclass: ## Install a default storage class for the clus
 		echo "Kubernetes version $(KUBERNETES_VERSION) is below 1.31, no default storage class will be installed"; \
 	fi
 	@echo "✅ Default storage class installed."
+
+.PHONY: k8s-uninstall-simple-storageclass
+k8s-uninstall-simple-storageclass: ## Uninstall the default storage class from the cluster.
+	@echo "Uninstalling default storage class..."
+	$(KUBECTL) delete storageclass local-path --ignore-not-found=true
+	@echo "✅ Default storage class uninstalled."
+
+##@ KubeVirt Operator Installation
+KUBEVIRTNAMESPACE := kubevirt
+.PHONY: k8s-install-kubevirt
+k8s-install-kubevirt: ## Install KubeVirt operator and CRDs into the K8s cluster specified in ~/.kube/config.
+	@echo "Installing KubeVirt operator and CRDs..."
+	$(eval VERSION=$(shell curl -s https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt))
+	@echo "Using KubeVirt version: $(VERSION)"
+	$(KUBECTL) apply -f https://github.com/kubevirt/kubevirt/releases/download/$(VERSION)/kubevirt-operator.yaml
+	$(KUBECTL) apply -f https://github.com/kubevirt/kubevirt/releases/download/$(VERSION)/kubevirt-cr.yaml
+	
+	@echo "🔄 Waiting for KubeVirt CR to become available..."
+	@RESOURCE_NAME=$$(kubectl get kubevirt -n $(KUBEVIRTNAMESPACE) -o jsonpath="{.items[0].metadata.name}") && \
+	kubectl wait kubevirt $$RESOURCE_NAME --for=condition=Available --timeout=5m -n $(KUBEVIRTNAMESPACE)
+
+	@echo "🔄 Waiting for KubeVirt core components to be ready..."
+	@for component in virt-operator virt-api virt-controller; do \
+		echo "⏳ Waiting for deployment $$component..."; \
+		kubectl rollout status deployment $$component -n $(KUBEVIRTNAMESPACE) || exit 1; \
+	done
+
+	@echo "🔄 Waiting for virt-handler pods to be ready..."
+	@kubectl wait --for=condition=Ready pod -l kubevirt.io=virt-handler -n $(KUBEVIRTNAMESPACE) --timeout=300s
+
+	@echo "✅ KubeVirt is fully deployed and ready."
+
+
+.PHONY: k8s-uninstall-kubevirt
+k8s-uninstall-kubevirt: ## Uninstall KubeVirt operator and CRDs from the K8s cluster specified in ~/.kube/config.
+	@echo "Uninstalling KubeVirt operator and CRDs..."
+	$(eval VERSION=$(shell curl -s https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt))
+	@echo "Using KubeVirt version: $(VERSION)"
+	@echo "Deleting KubeVirt CRDs..."
+	$(KUBECTL) delete -f https://github.com/kubevirt/kubevirt/releases/download/$(VERSION)/kubevirt-operator.yaml
+	@echo "Deleting KubeVirt operator..."
+	$(KUBECTL) delete -f https://github.com/kubevirt/kubevirt/releases/download/$(VERSION)/kubevirt-cr.yaml
+	@echo "Deleting KubeVirt namespace..."
+	$(KUBECTL) delete namespace $(KUBEVIRTNAMESPACE)
+	@echo "✅ KubeVirt operator and CRDs uninstalled."
+
+
+.PHONY: k8s-kubevirt-emulation-patch
+k8s-kubevirt-emulation-patch: ## Patch cluster to support KubeVirt.
+	@echo "Patching Kind cluster to support KubeVirt..."
+	$(KUBECTL) -n kubevirt patch kubevirt kubevirt --type=merge --patch '{"spec":{"configuration":{"developerConfiguration":{"useEmulation":true}}}}'
+	@echo "✅ Kind cluster patched for KubeVirt."
+
+.PHONY: k8s-install-kubevirt-containerized-data-importer
+k8s-install-kubevirt-containerized-data-importer: ## Install KubeVirt CDI operator and CRDs into the K8s cluster specified in ~/.kube/config.
+	@echo "Installing KubeVirt Containerized data importer operator and CRDs..."
+	$(eval VERSION=$(shell curl -s https://api.github.com/repos/kubevirt/containerized-data-importer/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'))
+	@echo "Using CDI version: $(VERSION)"
+	$(KUBECTL) create -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-operator.yaml
+	$(KUBECTL) create -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-cr.yaml
+
+.PHONY: k8s-uninstall-kubevirt-containerized-data-importer
+k8s-uninstall-kubevirt-containerized-data-importer: ## Install KubeVirt CDI operator and CRDs into the K8s cluster specified in ~/.kube/config.
+	@echo "Uninstalling KubeVirt Containerized data importer operator and CRDs..."
+	$(eval VERSION=$(shell curl -s https://api.github.com/repos/kubevirt/containerized-data-importer/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'))
+	@echo "Using CDI version: $(VERSION)"
+	$(KUBECTL) delete -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-operator.yaml
+	$(KUBECTL) delete -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-cr.yaml
