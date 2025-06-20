@@ -32,3 +32,8 @@ hack/crds
 
 # Temporary token files for Docker builds
 .github-token
+
+#talos setup
+hack/talos/talosconfig
+hack/talos/controlplane.yaml
+hack/talos/worker.yaml

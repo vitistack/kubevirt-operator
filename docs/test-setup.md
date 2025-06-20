@@ -16,7 +16,7 @@ This creates three files, `controlplane.yaml` (setup for control planes), `worke
 
 ## Create the cluster
 
-`talosctl cluster create --name virt --controlplanes 3 --workers 3 --mtu 1500 --talosconfig ./talosconfig`
+`talosctl cluster create --name virt --controlplanes 3 --workers 3 --mtu 1500 --talosconfig ./hack/talos/talosconfig`
 
 Adjust the number of control planes and workers.
 
@@ -28,7 +28,7 @@ Talos CLI automatically merges with your default kube config (~/.kube/config)
 
 But if you want to extract the kubeconfig to a own file, do:
 
-`talosctl kubeconfig ./cluster.kube.config --nodes 10.5.0.2 --talosconfig ~/talosconfig`
+`talosctl kubeconfig ./cluster.kube.config --nodes 10.5.0.2 --talosconfig ./hack/talos/talosconfig`
 
 Use it by:
 
@@ -49,37 +49,15 @@ Installs kubevirt from latest
 
 `make k8s-install-kubevirt`
 
-(
-Patches the kubevirt to be in a emulated environment
+## If running in Docker Desktop / Podman,
+
 `make k8s-kubevirt-emulation-patch`
-)
+
+patches the kubevirt to be in a emulated environment
 
 # Install storage
 
-Follow talos doc for rook ceph: https://www.talos.dev/v1.10/kubernetes-guides/configuration/ceph-with-rook/
-
-1. Add helm repo:
-
-`helm repo add rook-release https://charts.rook.io/release`
-
-2. Set privileged in talos for namespace
-
-`kubectl label namespace rook-ceph pod-security.kubernetes.io/enforce=privileged`
-
-3. Install rook ceph cluster
-
-`helm install --create-namespace --namespace rook-ceph rook-ceph-cluster --set operatorNamespace=rook-ceph rook-release/rook-ceph-cluster`
-
-4. Wait for cluster to finish
-
-`watch kubectl --namespace rook-ceph get cephcluster rook-ceph`
-
-```bash
-Every 2.0s: kubectl --namespace rook-ceph get cephcluster rook-ceph
-
-NAME        DATADIRHOSTPATH   MONCOUNT   AGE   PHASE         MESSAGE                 HEALTH   EXTERNAL
-rook-ceph   /var/lib/rook     3          57s   Progressing   Configuring Ceph Mons
-```
+`make k8s-install-simple-storageclass`
 
 # Cleanup / Uninstall
 

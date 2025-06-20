@@ -55,3 +55,7 @@ Dependabot is configured to automatically open pull requests for:
 - Helm chart dependencies
 
 Pull requests for minor and patch updates are automatically approved and merged. Major updates require manual review and approval.
+
+# Setup local kubernetes cluster with talos, viti crds, kubevirt and storage class
+
+[Setup documentation](./docs/test-setup.md)
