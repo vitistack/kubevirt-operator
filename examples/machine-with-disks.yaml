@@ -1,0 +1,25 @@
+---
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-machine-with-disks
+  namespace: default
+spec:
+  instanceType: "medium"
+  name: "example-vm-with-disks"
+  disks:
+    - name: "root"
+      sizeGB: 20
+      boot: true
+      type: "virtio"
+      encrypted: false
+    - name: "data"
+      sizeGB: 50
+      boot: false
+      type: "virtio"
+      encrypted: false
+    - name: "logs"
+      sizeGB: 10
+      boot: false
+      type: "virtio"
+      encrypted: false

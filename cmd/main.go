@@ -281,10 +281,8 @@ func setupManager(config *Configuration, metricsOpts *metricsserver.Options, web
 // addWatchersToManager adds the certificate watchers to the manager
 func addWatchersToManager(mgr ctrl.Manager, metricsCertWatcher, webhookCertWatcher *certwatcher.CertWatcher) {
 	// Setup controllers
-	if err := (&controllers.MachineReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	machineReconciler := controllers.NewMachineReconciler(mgr.GetClient(), mgr.GetScheme())
+	if err := machineReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Machine")
 		os.Exit(1)
 	}

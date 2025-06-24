@@ -1,0 +1,63 @@
+---
+# Example 1: Machine with no disks specified (will create default 10Gi root disk)
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: simple-machine
+  namespace: default
+spec:
+  instanceType: "small"
+  name: "simple-vm"
+
+---
+# Example 2: Machine with single custom root disk
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: single-disk-machine
+  namespace: default
+spec:
+  instanceType: "medium"
+  name: "single-disk-vm"
+  disks:
+    - name: "root"
+      sizeGB: 30
+      boot: true
+      type: "virtio"
+
+---
+# Example 3: Machine with multiple disks (root + data disks)
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: multi-disk-machine
+  namespace: default
+spec:
+  instanceType: "large"
+  name: "multi-disk-vm"
+  memory: 8589934592 # 8GB in bytes
+  cpu:
+    cores: 4
+  disks:
+    - name: "root"
+      sizeGB: 40
+      boot: true
+      type: "virtio"
+      encrypted: false
+    - name: "data1"
+      sizeGB: 100
+      boot: false
+      type: "virtio"
+      encrypted: false
+    - name: "data2"
+      sizeGB: 200
+      boot: false
+      type: "sata"
+      encrypted: false
+    - name: "scratch"
+      sizeGB: 50
+      boot: false
+      type: "scsi"
+      encrypted: false
+      iops: 3000
+      throughput: 500
