@@ -37,4 +37,5 @@ hack/crds
 hack/talos/talosconfig
 hack/talos/controlplane.yaml
 hack/talos/worker.yaml
+hack/talos/cluster.kube.config
 main

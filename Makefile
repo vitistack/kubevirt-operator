@@ -19,6 +19,24 @@ CONTAINER_TOOL ?= docker
 SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
+# Basic colors
+BLACK=\033[0;30m
+RED=\033[0;31m
+GREEN=\033[0;32m
+YELLOW=\033[0;33m
+BLUE=\033[0;34m
+PURPLE=\033[0;35m
+CYAN=\033[0;36m
+WHITE=\033[0;37m
+
+# Text formatting
+BOLD=\033[1m
+UNDERLINE=\033[4m
+RESET=\033[0m
+
+# Get GITHUB_TOKEN from environment
+GITHUB_TOKEN ?= $(shell echo $$GITHUB_TOKEN)
+
 .PHONY: all
 all: build
 
@@ -41,10 +59,10 @@ help: ## Display this help.
 
 .PHONY: clean-build-files
 clean-build-files: ## Clean up temporary build files
-	@echo "Cleaning up temporary build files..."
+	@echo -e "Cleaning up temporary build files..."
 	@rm -f $(PWD)/.github-token
 	@rm -f Dockerfile.cross
-	@echo "✅ Build files cleaned"
+	@echo -e "✅ Build files cleaned"
 
 ##@ Development
 
@@ -102,17 +120,17 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 ##@ Dependencies
 
 deps: ## Download and verify dependencies
-	@echo "Downloading dependencies..."
+	@echo -e "Downloading dependencies..."
 	@go mod download
 	@go mod verify
 	@go mod tidy
-	@echo "Dependencies updated!"
+	@echo -e "Dependencies updated!"
 
 update-deps: ## Update dependencies
-	@echo "Updating dependencies..."
+	@echo -e "Updating dependencies..."
 	@go get -u ./...
 	@go mod tidy
-	@echo "Dependencies updated!"
+	@echo -e "Dependencies updated!"
 
 ##@ Build
 
@@ -143,7 +161,7 @@ docker-build-with-github-token: ## Build docker image with the manager using Doc
 		echo "Error: GITHUB_TOKEN environment variable is required for private repository access"; \
 		exit 1; \
 	fi
-	@echo "$$GITHUB_TOKEN" > $(PWD)/.github-token
+	@echo -e "$$GITHUB_TOKEN" > $(PWD)/.github-token
 	@chmod 600 $(PWD)/.github-token
 	DOCKER_BUILDKIT=1 $(CONTAINER_TOOL) build --secret id=github_token,src=$(PWD)/.github-token -t ${IMG} -f Dockerfile.secrets .
 	@rm -f $(PWD)/.github-token
@@ -186,7 +204,7 @@ docker-buildx-with-github-token: ## Build and push docker image for the manager 
 
 .PHONY: test-build
 test-build: ## Test that the Docker build works (tries SSH first, then secrets)
-	@echo "Testing Docker build with private repository access..."
+	@echo -e "Testing Docker build with private repository access..."
 	@if ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then \
 		echo "Using SSH authentication..."; \
 		$(MAKE) docker-build-with-ssh; \
@@ -267,7 +285,7 @@ $(CONTROLLER_GEN): $(LOCALBIN)
 
 .PHONY: setup-envtest
 setup-envtest: envtest ## Download the binaries required for ENVTEST in the local bin directory.
-	@echo "Setting up envtest binaries for Kubernetes version $(ENVTEST_K8S_VERSION)..."
+	@echo -e "Setting up envtest binaries for Kubernetes version $(ENVTEST_K8S_VERSION)..."
 	@$(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path || { \
 		echo "Error: Failed to set up envtest binaries for version $(ENVTEST_K8S_VERSION)."; \
 		exit 1; \
@@ -303,158 +321,164 @@ endef
 .PHONY: k8s-install-viti-crds k8s-download-viti-crds k8s-uninstall-viti-crds
 
 k8s-install-viti-crds: ## Install CRDs into a cluster
-	@echo "${GREEN}Installing CRDs...${RESET}"
+	@echo -e "${GREEN}Installing CRDs...${RESET}"
 	@if [ ! -d "hack/crds" ]; then \
-		echo "${RED}Error: hack/crds directory does not exist${RESET}"; \
-		echo "${YELLOW}Run 'make download-viti-crds' first to download the CRDs (requires GITHUB_TOKEN)${RESET}"; \
+		echo -e "${RED}Error: hack/crds directory does not exist${RESET}"; \
+		echo -e "${YELLOW}Run 'make k8s-download-viti-crds' first to download the CRDs (requires GITHUB_TOKEN)${RESET}"; \
 		exit 1; \
 	fi
 	@if [ -z "$$(find hack/crds -name '*.yaml' -type f 2>/dev/null)" ]; then \
-		echo "${RED}Error: No YAML files found in hack/crds directory${RESET}"; \
-		echo "${YELLOW}Run 'make download-viti-crds' first to download the CRDs (requires GITHUB_TOKEN)${RESET}"; \
+		echo -e "${RED}Error: No YAML files found in hack/crds directory${RESET}"; \
+		echo -e "${YELLOW}Run 'make k8s-download-viti-crds' first to download the CRDs (requires GITHUB_TOKEN)${RESET}"; \
 		exit 1; \
 	fi
 	@echo "Found CRD files:"
 	@ls -1 hack/crds/*.yaml | sed 's/^/  - /'
 	${KUBECTL} apply -f hack/crds/
-	@echo "${GREEN}CRDs installed successfully${RESET}"
+	@echo -e "${GREEN}CRDs installed successfully${RESET}"
 
 k8s-download-viti-crds: ## Download CRDs from private repository (requires GITHUB_TOKEN)
-	@echo "${GREEN}Downloading CRDs from private repository...${RESET}"
-	@if [ -z "$$GITHUB_TOKEN" ]; then \
-		echo "${RED}Error: GITHUB_TOKEN environment variable is required for private repository access${RESET}"; \
+	@echo -e "${GREEN}Downloading CRDs from private repository...${RESET}"
+	@if [ -z "$(GITHUB_TOKEN)" ]; then \
+		echo -e "${RED}Error: GITHUB_TOKEN environment variable is required for private repository access${RESET}"; \
+		echo -e "${YELLOW}Please set your GITHUB_TOKEN environment variable${RESET}"; \
 		exit 1; \
 	fi
 	@mkdir -p hack/crds
 	@echo "Downloading vitistack.io_datacenters.yaml..."
-	@if ! curl --fail -H "Authorization: token $$GITHUB_TOKEN" \
+	@if ! curl --fail -H "Authorization: token $(GITHUB_TOKEN)" \
 		-H "Accept: application/vnd.github.v3.raw" \
 		-o hack/crds/vitistack.io_datacenters.yaml \
 		https://api.github.com/repos/vitistack/crds/contents/crds/vitistack.io_datacenters.yaml; then \
-		echo "${RED}Error: Failed to download vitistack.io_datacenters.yaml${RESET}"; \
+		echo -e "${RED}Error: Failed to download vitistack.io_datacenters.yaml${RESET}"; \
 		exit 1; \
 	fi
 	@echo "Downloading vitistack.io_kubernetesproviders.yaml..."
-	@if ! curl --fail -H "Authorization: token $$GITHUB_TOKEN" \
+	@if ! curl --fail -H "Authorization: token $(GITHUB_TOKEN)" \
 		-H "Accept: application/vnd.github.v3.raw" \
 		-o hack/crds/vitistack.io_kubernetesproviders.yaml \
 		https://api.github.com/repos/vitistack/crds/contents/crds/vitistack.io_kubernetesproviders.yaml; then \
-		echo "${RED}Error: Failed to download vitistack.io_kubernetesproviders.yaml${RESET}"; \
+		echo -e "${RED}Error: Failed to download vitistack.io_kubernetesproviders.yaml${RESET}"; \
 		exit 1; \
 	fi
 	@echo "Downloading vitistack.io_machineproviders.yaml..."
-	@if ! curl --fail -H "Authorization: token $$GITHUB_TOKEN" \
+	@if ! curl --fail -H "Authorization: token $(GITHUB_TOKEN)" \
 		-H "Accept: application/vnd.github.v3.raw" \
 		-o hack/crds/vitistack.io_machineproviders.yaml \
 		https://api.github.com/repos/vitistack/crds/contents/crds/vitistack.io_machineproviders.yaml; then \
-		echo "${RED}Error: Failed to download vitistack.io_machineproviders.yaml${RESET}"; \
+		echo -e "${RED}Error: Failed to download vitistack.io_machineproviders.yaml${RESET}"; \
 		exit 1; \
 	fi
 	@echo "Downloading vitistack.io_machines.yaml..."
-	@if ! curl --fail -H "Authorization: token $$GITHUB_TOKEN" \
+	@if ! curl --fail -H "Authorization: token $(GITHUB_TOKEN)" \
 		-H "Accept: application/vnd.github.v3.raw" \
 		-o hack/crds/vitistack.io_machines.yaml \
 		https://api.github.com/repos/vitistack/crds/contents/crds/vitistack.io_machines.yaml; then \
-		echo "${RED}Error: Failed to download vitistack.io_machines.yaml${RESET}"; \
+		echo -e "${RED}Error: Failed to download vitistack.io_machines.yaml${RESET}"; \
 		exit 1; \
 	fi
 	@echo "Downloading vitistack.io_kubernetesclusters.yaml..."
-	@if ! curl --fail -H "Authorization: token $$GITHUB_TOKEN" \
+	@if ! curl --fail -H "Authorization: token $(GITHUB_TOKEN)" \
 		-H "Accept: application/vnd.github.v3.raw" \
 		-o hack/crds/vitistack.io_kubernetesclusters.yaml \
 		https://api.github.com/repos/vitistack/crds/contents/crds/vitistack.io_kubernetesclusters.yaml; then \
-		echo "${RED}Error: Failed to download vitistack.io_kubernetesclusters.yaml${RESET}"; \
+		echo -e "${RED}Error: Failed to download vitistack.io_kubernetesclusters.yaml${RESET}"; \
 		exit 1; \
 	fi
-	@echo "${GREEN}CRDs downloaded successfully${RESET}"
+	@echo -e "${GREEN}CRDs downloaded successfully${RESET}"
 
 k8s-uninstall-viti-crds: check-kubectl ## Uninstall CRDs into a cluster
-	@echo "${RED}Uninstalling CRDs...${RESET}"
+	@echo -e "${RED}Uninstalling CRDs...${RESET}"
 	${KUBECTL} delete -f hack/crds/
 
 ##@ Kubernetes 
 
 .PHONY: k8s-install-simple-storageclass
 k8s-install-simple-storageclass: ## Install a default storage class for the cluster.
-	@echo "Installing default storage class..."
+	@echo -e "Installing default storage class..."
 	$(eval KUBERNETES_VERSION := $(shell kubectl version --output=json 2>/dev/null | jq -r '.serverVersion.major + "." + .serverVersion.minor' 2>/dev/null || kubectl version --output=yaml 2>/dev/null | grep gitVersion | head -1 | sed 's/.*v\([0-9]*\.[0-9]*\).*/\1/' || echo "1.31"))
 	@if [ -z "$(KUBERNETES_VERSION)" ]; then \
 		echo "Error: KUBERNETES_VERSION could not be determined"; \
 		exit 1; \
 	fi
-	@echo "Detected Kubernetes version: $(KUBERNETES_VERSION)"
+	@echo -e "Detected Kubernetes version: $(KUBERNETES_VERSION)"
 	@if [ "$$(echo "$(KUBERNETES_VERSION) >= 1.31" | bc -l)" -eq 1 ] 2>/dev/null || [ "$$(printf "$(KUBERNETES_VERSION)\n1.31" | sort -V | head -n1)" = "1.31" ]; then \
+		$(KUBECTL) create namespace local-path-storage ; \
+		$(KUBECTL) label namespace local-path-storage pod-security.kubernetes.io/enforce=privileged; \
 		$(KUBECTL) apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/master/deploy/local-path-storage.yaml; \
 		$(KUBECTL) patch storageclass local-path -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'; \
 	else \
 		echo "Kubernetes version $(KUBERNETES_VERSION) is below 1.31, no default storage class will be installed"; \
 	fi
-	@echo "✅ Default storage class installed."
+	@echo -e "✅ Default storage class installed."
 
 .PHONY: k8s-uninstall-simple-storageclass
 k8s-uninstall-simple-storageclass: ## Uninstall the default storage class from the cluster.
-	@echo "Uninstalling default storage class..."
+	@echo -e "Uninstalling default storage class..."
 	$(KUBECTL) delete storageclass local-path --ignore-not-found=true
-	@echo "✅ Default storage class uninstalled."
+	$(KUBECTL) delete namespace local-path-storage --ignore-not-found=true
+	@echo -e "✅ Default storage class uninstalled."
 
 ##@ KubeVirt Operator Installation
 KUBEVIRTNAMESPACE := kubevirt
 .PHONY: k8s-install-kubevirt
 k8s-install-kubevirt: ## Install KubeVirt operator and CRDs into the K8s cluster specified in ~/.kube/config.
-	@echo "Installing KubeVirt operator and CRDs..."
+	@echo -e "Installing KubeVirt operator and CRDs..."
 	$(eval VERSION=$(shell curl -s https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt))
-	@echo "Using KubeVirt version: $(VERSION)"
+	@echo -e "Using KubeVirt version: $(VERSION)"
+	$(KUBECTL) create namespace kubevirt ; \
+	$(KUBECTL) label namespace kubevirt pod-security.kubernetes.io/enforce=privileged; \
 	$(KUBECTL) apply -f https://github.com/kubevirt/kubevirt/releases/download/$(VERSION)/kubevirt-operator.yaml
 	$(KUBECTL) apply -f https://github.com/kubevirt/kubevirt/releases/download/$(VERSION)/kubevirt-cr.yaml
 	
-	@echo "🔄 Waiting for KubeVirt CR to become available..."
+	@echo -e "🔄 Waiting for KubeVirt CR to become available..."
 	@RESOURCE_NAME=$$(kubectl get kubevirt -n $(KUBEVIRTNAMESPACE) -o jsonpath="{.items[0].metadata.name}") && \
 	kubectl wait kubevirt $$RESOURCE_NAME --for=condition=Available --timeout=5m -n $(KUBEVIRTNAMESPACE)
 
-	@echo "🔄 Waiting for KubeVirt core components to be ready..."
+	@echo -e "🔄 Waiting for KubeVirt core components to be ready..."
 	@for component in virt-operator virt-api virt-controller; do \
 		echo "⏳ Waiting for deployment $$component..."; \
 		kubectl rollout status deployment $$component -n $(KUBEVIRTNAMESPACE) || exit 1; \
 	done
 
-	@echo "🔄 Waiting for virt-handler pods to be ready..."
+	@echo -e "🔄 Waiting for virt-handler pods to be ready..."
 	@kubectl wait --for=condition=Ready pod -l kubevirt.io=virt-handler -n $(KUBEVIRTNAMESPACE) --timeout=300s
 
-	@echo "✅ KubeVirt is fully deployed and ready."
+	@echo -e "✅ KubeVirt is fully deployed and ready."
 
 
 .PHONY: k8s-uninstall-kubevirt
 k8s-uninstall-kubevirt: ## Uninstall KubeVirt operator and CRDs from the K8s cluster specified in ~/.kube/config.
-	@echo "Uninstalling KubeVirt operator and CRDs..."
+	@echo -e "Uninstalling KubeVirt operator and CRDs..."
 	$(eval VERSION=$(shell curl -s https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt))
-	@echo "Using KubeVirt version: $(VERSION)"
-	@echo "Deleting KubeVirt CRDs..."
+	@echo -e "Using KubeVirt version: $(VERSION)"
+	@echo -e "Deleting KubeVirt CRDs..."
 	$(KUBECTL) delete -f https://github.com/kubevirt/kubevirt/releases/download/$(VERSION)/kubevirt-operator.yaml
-	@echo "Deleting KubeVirt operator..."
+	@echo -e "Deleting KubeVirt operator..."
 	$(KUBECTL) delete -f https://github.com/kubevirt/kubevirt/releases/download/$(VERSION)/kubevirt-cr.yaml
-	@echo "Deleting KubeVirt namespace..."
+	@echo -e "Deleting KubeVirt namespace..."
 	$(KUBECTL) delete namespace $(KUBEVIRTNAMESPACE)
-	@echo "✅ KubeVirt operator and CRDs uninstalled."
+	@echo -e "✅ KubeVirt operator and CRDs uninstalled."
 
 
 .PHONY: k8s-kubevirt-emulation-patch
 k8s-kubevirt-emulation-patch: ## Patch cluster to support KubeVirt.
-	@echo "Patching Kind cluster to support KubeVirt..."
+	@echo -e "Patching Kind cluster to support KubeVirt..."
 	$(KUBECTL) -n kubevirt patch kubevirt kubevirt --type=merge --patch '{"spec":{"configuration":{"developerConfiguration":{"useEmulation":true}}}}'
-	@echo "✅ Kind cluster patched for KubeVirt."
+	@echo -e "✅ Kind cluster patched for KubeVirt."
 
 .PHONY: k8s-install-kubevirt-containerized-data-importer
 k8s-install-kubevirt-containerized-data-importer: ## Install KubeVirt CDI operator and CRDs into the K8s cluster specified in ~/.kube/config.
-	@echo "Installing KubeVirt Containerized data importer operator and CRDs..."
+	@echo -e "Installing KubeVirt Containerized data importer operator and CRDs..."
 	$(eval VERSION=$(shell curl -s https://api.github.com/repos/kubevirt/containerized-data-importer/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'))
-	@echo "Using CDI version: $(VERSION)"
+	@echo -e "Using CDI version: $(VERSION)"
 	$(KUBECTL) create -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-operator.yaml
 	$(KUBECTL) create -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-cr.yaml
 
 .PHONY: k8s-uninstall-kubevirt-containerized-data-importer
 k8s-uninstall-kubevirt-containerized-data-importer: ## Install KubeVirt CDI operator and CRDs into the K8s cluster specified in ~/.kube/config.
-	@echo "Uninstalling KubeVirt Containerized data importer operator and CRDs..."
+	@echo -e "Uninstalling KubeVirt Containerized data importer operator and CRDs..."
 	$(eval VERSION=$(shell curl -s https://api.github.com/repos/kubevirt/containerized-data-importer/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'))
-	@echo "Using CDI version: $(VERSION)"
+	@echo -e "Using CDI version: $(VERSION)"
 	$(KUBECTL) delete -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-operator.yaml
 	$(KUBECTL) delete -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-cr.yaml
