@@ -25,6 +25,7 @@ import (
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	"github.com/vitistack/kubevirt-operator/internal/services/initializationservice"
+	"github.com/vitistack/kubevirt-operator/internal/settings"
 	"github.com/vitistack/kubevirt-operator/pkg/clients"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
@@ -73,6 +74,7 @@ func init() {
 }
 
 func main() {
+	settings.Init()
 	// Parse command line flags
 	config := parseFlags()
 

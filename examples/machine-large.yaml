@@ -1,0 +1,8 @@
+---
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-machine-large
+spec:
+  instanceType: "large"
+  name: "example-vm-large"

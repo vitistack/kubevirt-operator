@@ -1,0 +1,8 @@
+---
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-machine-medium
+spec:
+  instanceType: "medium"
+  name: "example-vm-medium"

@@ -37,3 +37,4 @@ hack/crds
 hack/talos/talosconfig
 hack/talos/controlplane.yaml
 hack/talos/worker.yaml
+main

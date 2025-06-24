@@ -23,6 +23,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -34,9 +35,12 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/spf13/viper"
 	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
+	"github.com/vitistack/kubevirt-operator/internal/consts"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 )
 
@@ -55,7 +59,10 @@ const (
 // +kubebuilder:rbac:groups=vitistack.io,resources=machines/finalizers,verbs=update
 // +kubebuilder:rbac:groups=kubevirt.io,resources=virtualmachines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kubevirt.io,resources=virtualmachines/status,verbs=get
+// +kubebuilder:rbac:groups=kubevirt.io,resources=virtualmachineinstances,verbs=get;list;watch
+// +kubebuilder:rbac:groups=kubevirt.io,resources=virtualmachineinstances/status,verbs=get
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch
 
 func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -114,8 +121,25 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
-	// Update Machine status based on VirtualMachine status
-	return r.updateMachineStatusFromVM(ctx, machine, vm)
+	// Get the VirtualMachineInstance if it exists
+	vmi := &kubevirtv1.VirtualMachineInstance{}
+	vmiNamespacedName := types.NamespacedName{
+		Name:      vmName,
+		Namespace: machine.Namespace,
+	}
+
+	vmiExists := false
+	err = r.Get(ctx, vmiNamespacedName, vmi)
+	if err != nil && !errors.IsNotFound(err) {
+		logger.Error(err, "Failed to get VirtualMachineInstance")
+		return ctrl.Result{}, err
+	} else if err == nil {
+		vmiExists = true
+		logger.Info("Found VirtualMachineInstance", "vmi", vmi.Name, "phase", vmi.Status.Phase)
+	}
+
+	// Update Machine status based on VirtualMachine and VirtualMachineInstance status
+	return r.updateMachineStatusFromVMAndVMI(ctx, machine, vm, vmi, vmiExists)
 }
 
 func (r *MachineReconciler) createPVC(ctx context.Context, machine *vitistackv1alpha1.Machine, pvcName string) (*corev1.PersistentVolumeClaim, error) {
@@ -204,6 +228,7 @@ func (r *MachineReconciler) createVirtualMachine(ctx context.Context, machine *v
 	// Create a local variable for RunStrategy since we need its address
 	// Using RunStrategyAlways to ensure the VM starts automatically (replaces deprecated Running: true)
 	runStrategy := kubevirtv1.RunStrategyAlways
+	cpuModel := viper.GetString(consts.CPU_MODEL)
 
 	vm := &kubevirtv1.VirtualMachine{
 		ObjectMeta: metav1.ObjectMeta{
@@ -232,8 +257,8 @@ func (r *MachineReconciler) createVirtualMachine(ctx context.Context, machine *v
 							},
 						},
 						CPU: &kubevirtv1.CPU{
-							Cores: uint32(machine.Spec.CPU.Cores),
-							Model: "host-passthrough",
+							//Cores: uint32(coresRequest),
+							Model: cpuModel,
 						},
 						Devices: kubevirtv1.Devices{
 							Disks: []kubevirtv1.Disk{
@@ -316,11 +341,15 @@ func (r *MachineReconciler) updateMachineStatusFromVM(ctx context.Context, machi
 }
 
 func (r *MachineReconciler) updateMachineStatus(ctx context.Context, machine *vitistackv1alpha1.Machine, state string) error {
+	return r.updateMachineStatusWithDetails(ctx, machine, state, "")
+}
+
+func (r *MachineReconciler) updateMachineStatusWithDetails(ctx context.Context, machine *vitistackv1alpha1.Machine, state string, errorDetails string) error {
 	logger := log.FromContext(ctx)
 
 	// Retry logic for status updates to handle resource version conflicts
 	maxRetries := 3
-	for i := 0; i < maxRetries; i++ {
+	for i := range maxRetries {
 		// Get the latest version of the Machine to avoid resource version conflicts
 		latestMachine := &vitistackv1alpha1.Machine{}
 		if err := r.Get(ctx, types.NamespacedName{
@@ -332,10 +361,12 @@ func (r *MachineReconciler) updateMachineStatus(ctx context.Context, machine *vi
 		}
 
 		// Update the status fields - only use fields that exist in the external CRD
-		latestMachine.Status.State = state
-		latestMachine.Status.Phase = state
+		latestMachine.Status = machine.Status
 		latestMachine.Status.LastUpdated = metav1.Now()
 		latestMachine.Status.Provider = "kubevirt"
+
+		// Note: The Status field and Conditions field might not exist in the external CRD Go types
+		// We log error details instead and rely on the State field for error indication
 
 		// Attempt to update the status
 		if err := r.Status().Update(ctx, latestMachine); err != nil {
@@ -414,11 +445,342 @@ func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitista
 	return ctrl.Result{}, nil
 }
 
+func (r *MachineReconciler) updateMachineStatusFromVMAndVMI(ctx context.Context, machine *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine, vmi *kubevirtv1.VirtualMachineInstance, vmiExists bool) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Determine state based on VirtualMachine and VirtualMachineInstance state
+	var state string
+	var requeue bool
+	var phase string
+
+	if vmiExists {
+		// Use VMI status as it's more accurate for running instances
+		switch vmi.Status.Phase {
+		case kubevirtv1.Running:
+			state = "Running"
+			phase = "Running"
+		case kubevirtv1.Pending:
+			state = "Pending"
+			phase = "Pending"
+			requeue = true
+		case kubevirtv1.Scheduling:
+			state = "Scheduling"
+			phase = "Scheduling"
+			requeue = true
+		case kubevirtv1.Scheduled:
+			state = "Scheduled"
+			phase = "Scheduled"
+			requeue = true
+		case kubevirtv1.Succeeded:
+			state = "Succeeded"
+			phase = "Succeeded"
+		case kubevirtv1.Failed:
+			state = "Failed"
+			phase = "Failed"
+		default:
+			state = "Unknown"
+			phase = "Unknown"
+			requeue = true
+		}
+
+		logger.Info("VMI status", "phase", vmi.Status.Phase, "state", state)
+
+		// Check for VMI errors that might prevent startup
+		if err := r.checkVMIErrorsAndUpdateStatus(ctx, machine, vmi); err != nil {
+			logger.Error(err, "Failed to check VMI errors")
+			// Continue processing even if error checking fails
+		}
+
+		// Additional VMI status information
+		if len(vmi.Status.Conditions) > 0 {
+			for _, condition := range vmi.Status.Conditions {
+				logger.Info("VMI condition", "type", condition.Type, "status", condition.Status, "reason", condition.Reason)
+			}
+		}
+
+	} else {
+		// Fall back to VM status if VMI doesn't exist yet
+		if vm.Status.Ready {
+			state = "Running"
+			phase = "Running"
+		} else if vm.Status.Created {
+			state = "Pending"
+			phase = "Pending"
+			requeue = true
+		} else {
+			state = "Pending"
+			phase = "Pending"
+			requeue = true
+		}
+
+		logger.Info("VM status (no VMI)", "ready", vm.Status.Ready, "created", vm.Status.Created, "state", state)
+
+		// Check for VM errors that might prevent VMI creation
+		if err := r.checkVMErrorsAndUpdateStatus(ctx, machine, vm); err != nil {
+			logger.Error(err, "Failed to check VM errors")
+			// Continue processing even if error checking fails
+		}
+	}
+
+	// Update machine status fields
+	machine.Status.Phase = phase
+	machine.Status.State = state
+	machine.Status.Provider = "kubevirt"
+
+	// todo fetch datacenter region and zone
+
+	// Update machine status
+	if err := r.updateMachineStatus(ctx, machine, state); err != nil {
+		logger.Error(err, "Failed to update Machine status")
+		return ctrl.Result{}, err
+	}
+
+	if requeue {
+		// Requeue to check status again
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// getVMIEvents fetches events related to a VirtualMachineInstance and returns error events
+func (r *MachineReconciler) getVMIEvents(ctx context.Context, vmi *kubevirtv1.VirtualMachineInstance, machine *vitistackv1alpha1.Machine) ([]string, error) {
+	logger := log.FromContext(ctx)
+
+	// Get events for the VMI
+	eventList := &corev1.EventList{}
+	listOpts := &client.ListOptions{
+		Namespace: vmi.Namespace,
+	}
+
+	if err := r.List(ctx, eventList, listOpts); err != nil {
+		logger.Error(err, "Failed to list events for VMI", "vmi", vmi.Name)
+		return nil, err
+	}
+
+	var errorEvents []string
+	for _, event := range eventList.Items {
+		// Filter events related to this VMI
+		if event.InvolvedObject.Name != vmi.Name ||
+			event.InvolvedObject.Kind != "VirtualMachineInstance" ||
+			event.InvolvedObject.UID != vmi.UID {
+			continue
+		}
+
+		// Only consider events that occurred after the machine was created
+		// This helps avoid stale events from previous instances
+		if event.FirstTimestamp.Before(&machine.CreationTimestamp) {
+			continue
+		}
+
+		// Also filter by VMI creation time to be extra sure
+		if !vmi.CreationTimestamp.IsZero() && event.FirstTimestamp.Before(&vmi.CreationTimestamp) {
+			continue
+		}
+
+		// Check for error events (Warning type or specific error reasons)
+		if event.Type == "Warning" ||
+			strings.Contains(strings.ToLower(event.Reason), "error") ||
+			strings.Contains(strings.ToLower(event.Reason), "failed") ||
+			strings.Contains(strings.ToLower(event.Message), "error") ||
+			strings.Contains(strings.ToLower(event.Message), "syncfailed") ||
+			strings.Contains(strings.ToLower(event.Message), "failed") {
+
+			// Format timestamp safely
+			timestamp := "unknown"
+			if !event.LastTimestamp.IsZero() {
+				timestamp = event.LastTimestamp.Format("15:04:05")
+			} else if !event.FirstTimestamp.IsZero() {
+				timestamp = event.FirstTimestamp.Format("15:04:05")
+			}
+
+			errorMsg := fmt.Sprintf("[%s] %s: %s",
+				timestamp,
+				event.Reason,
+				event.Message)
+			errorEvents = append(errorEvents, errorMsg)
+
+			logger.Info("Found VMI error event",
+				"vmi", vmi.Name,
+				"vmiUID", vmi.UID,
+				"eventUID", event.InvolvedObject.UID,
+				"reason", event.Reason,
+				"message", event.Message,
+				"type", event.Type,
+				"eventTime", event.FirstTimestamp)
+		}
+	}
+
+	return errorEvents, nil
+}
+
+// checkVMIErrorsAndUpdateStatus checks for VMI errors and updates machine status accordingly
+func (r *MachineReconciler) checkVMIErrorsAndUpdateStatus(ctx context.Context, machine *vitistackv1alpha1.Machine, vmi *kubevirtv1.VirtualMachineInstance) error {
+	logger := log.FromContext(ctx)
+
+	// Get VMI events to check for errors
+	errorEvents, err := r.getVMIEvents(ctx, vmi, machine)
+	if err != nil {
+		logger.Error(err, "Failed to get VMI events")
+		return err
+	}
+
+	// If there are error events and VMI is in a problematic state, update status
+	if len(errorEvents) > 0 && (vmi.Status.Phase == kubevirtv1.Pending ||
+		vmi.Status.Phase == kubevirtv1.Failed ||
+		vmi.Status.Phase == kubevirtv1.Scheduling ||
+		vmi.Status.Phase == kubevirtv1.Scheduled) {
+
+		machine.Status.State = "Failed"
+		machine.Status.Phase = "Failed"
+
+		// Update the status field with error information
+		errorSummary := fmt.Sprintf("VM startup failed - %d error(s) found: %s",
+			len(errorEvents),
+			strings.Join(errorEvents, "; "))
+
+		// Truncate if too long to avoid status field size limits
+		if len(errorSummary) > 500 {
+			errorSummary = errorSummary[:497] + "..."
+		}
+
+		// Store the error details in status fields that are available in the CRD
+		machine.Status.State = "Failed"
+		machine.Status.Phase = "Failed"
+
+		logger.Error(nil, "VMI has error events preventing startup",
+			"vmi", vmi.Name,
+			"errorCount", len(errorEvents),
+			"phase", vmi.Status.Phase,
+			"errorDetails", errorSummary)
+
+		// Use the proper failure fields that exist in the CRD schema
+		machine.Status.FailureMessage = &errorSummary
+		reason := "VMIError"
+		machine.Status.FailureReason = &reason
+	}
+
+	return nil
+}
+
+// getVMEvents fetches events related to a VirtualMachine and returns error events
+func (r *MachineReconciler) getVMEvents(ctx context.Context, vm *kubevirtv1.VirtualMachine, machine *vitistackv1alpha1.Machine) ([]string, error) {
+	logger := log.FromContext(ctx)
+
+	// Get events for the VM
+	eventList := &corev1.EventList{}
+	listOpts := &client.ListOptions{
+		Namespace: vm.Namespace,
+	}
+
+	if err := r.List(ctx, eventList, listOpts); err != nil {
+		logger.Error(err, "Failed to list events for VM", "vm", vm.Name)
+		return nil, err
+	}
+
+	var errorEvents []string
+	for _, event := range eventList.Items {
+		// Filter events related to this VM
+		if event.InvolvedObject.Name != vm.Name ||
+			event.InvolvedObject.Kind != "VirtualMachine" ||
+			event.InvolvedObject.UID != vm.UID {
+			continue
+		}
+
+		// Only consider events that occurred after the machine was created
+		// This helps avoid stale events from previous instances
+		if event.FirstTimestamp.Before(&machine.CreationTimestamp) {
+			continue
+		}
+
+		// Also filter by VM creation time to be extra sure
+		if !vm.CreationTimestamp.IsZero() && event.FirstTimestamp.Before(&vm.CreationTimestamp) {
+			continue
+		}
+
+		// Check for error events (Warning type or specific error reasons)
+		if event.Type == "Warning" ||
+			strings.Contains(strings.ToLower(event.Reason), "error") ||
+			strings.Contains(strings.ToLower(event.Reason), "failed") ||
+			strings.Contains(strings.ToLower(event.Message), "error") ||
+			strings.Contains(strings.ToLower(event.Message), "failed") {
+
+			// Format timestamp safely
+			timestamp := "unknown"
+			if !event.LastTimestamp.IsZero() {
+				timestamp = event.LastTimestamp.Format("15:04:05")
+			} else if !event.FirstTimestamp.IsZero() {
+				timestamp = event.FirstTimestamp.Format("15:04:05")
+			}
+
+			errorMsg := fmt.Sprintf("[%s] %s: %s",
+				timestamp,
+				event.Reason,
+				event.Message)
+			errorEvents = append(errorEvents, errorMsg)
+
+			logger.Info("Found VM error event",
+				"vm", vm.Name,
+				"vmUID", vm.UID,
+				"eventUID", event.InvolvedObject.UID,
+				"reason", event.Reason,
+				"message", event.Message,
+				"type", event.Type,
+				"eventTime", event.FirstTimestamp)
+		}
+	}
+
+	return errorEvents, nil
+}
+
+// checkVMErrorsAndUpdateStatus checks for VM errors and updates machine status accordingly
+func (r *MachineReconciler) checkVMErrorsAndUpdateStatus(ctx context.Context, machine *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine) error {
+	logger := log.FromContext(ctx)
+
+	// Get VM events to check for errors
+	errorEvents, err := r.getVMEvents(ctx, vm, machine)
+	if err != nil {
+		logger.Error(err, "Failed to get VM events")
+		return err
+	}
+
+	// If there are error events and VM is not ready, update status
+	if len(errorEvents) > 0 && !vm.Status.Ready {
+		machine.Status.State = "Failed"
+		machine.Status.Phase = "Failed"
+
+		// Update the status field with error information
+		errorSummary := fmt.Sprintf("VM creation failed - %d error(s) found: %s",
+			len(errorEvents),
+			strings.Join(errorEvents, "; "))
+
+		// Truncate if too long to avoid status field size limits
+		if len(errorSummary) > 500 {
+			errorSummary = errorSummary[:497] + "..."
+		}
+
+		logger.Error(nil, "VM has error events preventing startup",
+			"vm", vm.Name,
+			"errorCount", len(errorEvents),
+			"ready", vm.Status.Ready,
+			"errorDetails", errorSummary)
+
+		// Use the proper failure fields that exist in the CRD schema
+		machine.Status.FailureMessage = &errorSummary
+		reason := "VMError"
+		machine.Status.FailureReason = &reason
+	}
+
+	return nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vitistackv1alpha1.Machine{}).
 		Owns(&kubevirtv1.VirtualMachine{}).
 		Owns(&corev1.PersistentVolumeClaim{}).
+		Watches(&kubevirtv1.VirtualMachineInstance{},
+			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &vitistackv1alpha1.Machine{})).
 		Complete(r)
 }

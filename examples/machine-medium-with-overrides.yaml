@@ -1,0 +1,12 @@
+---
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-machine-medium-with-overrides
+spec:
+  instanceType: "medium"
+  name: "example-vm-medium-with-overrides"
+
+  memory: 3221225472 # 3 GB in bytes
+  cpu:
+    cores: 3
