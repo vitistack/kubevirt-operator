@@ -5,6 +5,41 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - kubevirt.io
+  resources:
+  - virtualmachineinstances
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - kubevirt.io
+  resources:
+  - virtualmachineinstances/status
+  - virtualmachines/status
+  verbs:
+  - get
+- apiGroups:
   - kubevirt.io
   resources:
   - virtualmachines
@@ -17,11 +52,13 @@ rules:
   - update
   - watch
 - apiGroups:
-  - kubevirt.io
+  - storage.k8s.io
   resources:
-  - virtualmachines/status
+  - storageclasses
   verbs:
   - get
+  - list
+  - watch
 - apiGroups:
   - vitistack.io
   resources:

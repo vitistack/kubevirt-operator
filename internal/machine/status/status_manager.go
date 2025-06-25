@@ -19,11 +19,14 @@ package status
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/internal/machine/events"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -112,6 +115,13 @@ func (m *StatusManager) UpdateMachineStatusFromVMAndVMI(ctx context.Context, mac
 		case kubevirtv1.Running:
 			state = "Running"
 			phase = "Running"
+
+			// When VMI is running, try to get Pod information for hostIP and podIP
+			if err := m.updatePodInformation(ctx, machine, vmi); err != nil {
+				logger.Error(err, "Failed to update pod information", "vmi", vmi.Name)
+				// Don't fail the reconciliation for this, just log the error
+			}
+
 		case kubevirtv1.Pending:
 			state = "Pending"
 			phase = "Pending"
@@ -284,4 +294,75 @@ func (m *StatusManager) checkVMErrorsAndUpdateStatus(ctx context.Context, machin
 	}
 
 	return nil
+}
+
+// updatePodInformation fetches the Pod created by the VMI and extracts HostIP and PodIP
+func (m *StatusManager) updatePodInformation(ctx context.Context, machine *vitistackv1alpha1.Machine, vmi *kubevirtv1.VirtualMachineInstance) error {
+	logger := log.FromContext(ctx)
+
+	// Get all Pods in the VMI's namespace and find one that contains the VMI name
+	// KubeVirt creates Pods with names that contain the VMI name but may have additional suffixes
+	podList := &corev1.PodList{}
+	if err := m.List(ctx, podList, client.InNamespace(vmi.Namespace)); err != nil {
+		return fmt.Errorf("failed to list Pods in namespace %s: %w", vmi.Namespace, err)
+	}
+
+	var matchedPod *corev1.Pod
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if strings.Contains(pod.Name, vmi.Name) {
+			// Additional check to ensure this is a KubeVirt Pod by checking labels
+			if pod.Labels != nil {
+				if kubevirtDomain, exists := pod.Labels["kubevirt.io/domain"]; exists && kubevirtDomain == vmi.Name {
+					matchedPod = pod
+					break
+				}
+				// Fallback: check if it's a virt-launcher pod
+				if podType, exists := pod.Labels["kubevirt.io"]; exists && strings.Contains(podType, "virt-launcher") {
+					matchedPod = pod
+					break
+				}
+			}
+		}
+	}
+
+	if matchedPod == nil {
+		logger.Info("No Pod found for VMI", "vmi", vmi.Name, "namespace", vmi.Namespace)
+		return nil // Not an error - Pod might not be created yet
+	}
+
+	logger.Info("Found Pod for VMI", "pod", matchedPod.Name, "namespace", matchedPod.Namespace, "hostIP", matchedPod.Status.HostIP, "podIP", matchedPod.Status.PodIP)
+
+	// Extract HostIP and PodIP from the Pod
+	hostIP := matchedPod.Status.HostIP
+	podIP := matchedPod.Status.PodIP
+
+	// Update Machine status with Pod information
+	// We'll use existing IP address fields in the CRD for this information
+	// Since the CRD has ipAddresses array, we'll use that for podIP
+	// For hostIP, we can use a custom field or repurpose an existing one
+
+	addPodIPToMachineStatus(podIP, machine, logger)
+
+	// For hostIP, we can store it in the hostname field or create a custom way to track it
+	// Let's use the hostname field to store host information
+	if hostIP != "" {
+		addPodIPToMachineStatus(hostIP, machine, logger)
+	}
+
+	return nil
+}
+
+func addPodIPToMachineStatus(podIP string, machine *vitistackv1alpha1.Machine, logger logr.Logger) {
+	if podIP != "" {
+		// Add podIP to the ipAddresses if not already present
+		found := slices.Contains(machine.Status.IPAddresses, podIP)
+		if !found {
+			if machine.Status.IPAddresses == nil {
+				machine.Status.IPAddresses = []string{}
+			}
+			machine.Status.IPAddresses = append(machine.Status.IPAddresses, podIP)
+			logger.Info("Added Pod IP to Machine status", "podIP", podIP)
+		}
+	}
 }
