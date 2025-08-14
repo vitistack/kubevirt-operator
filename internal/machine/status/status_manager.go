@@ -26,6 +26,7 @@ import (
 	"github.com/go-logr/logr"
 	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/internal/machine/events"
+	"github.com/vitistack/kubevirt-operator/pkg/consts"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -93,7 +94,7 @@ func (m *StatusManager) UpdateMachineStatusWithDetails(ctx context.Context, mach
 
 		// Success - update the passed machine object with the latest values for consistency
 		machine.Status = latestMachine.Status
-		machine.ObjectMeta.ResourceVersion = latestMachine.ObjectMeta.ResourceVersion
+		machine.ResourceVersion = latestMachine.ResourceVersion
 		return nil
 	}
 
@@ -103,107 +104,76 @@ func (m *StatusManager) UpdateMachineStatusWithDetails(ctx context.Context, mach
 // UpdateMachineStatusFromVMAndVMI determines and updates machine status based on VM and VMI state
 func (m *StatusManager) UpdateMachineStatusFromVMAndVMI(ctx context.Context, machine *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine, vmi *kubevirtv1.VirtualMachineInstance, vmiExists bool) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
+	state, phase, requeue := m.evaluateState(machine, vm, vmi, vmiExists, ctx)
 
-	// Determine state based on VirtualMachine and VirtualMachineInstance state
-	var state string
-	var requeue bool
-	var phase string
-
-	if vmiExists {
-		// Use VMI status as it's more accurate for running instances
-		switch vmi.Status.Phase {
-		case kubevirtv1.Running:
-			state = "Running"
-			phase = "Running"
-
-			// When VMI is running, try to get Pod information for hostIP and podIP
-			if err := m.updatePodInformation(ctx, machine, vmi); err != nil {
-				logger.Error(err, "Failed to update pod information", "vmi", vmi.Name)
-				// Don't fail the reconciliation for this, just log the error
-			}
-
-		case kubevirtv1.Pending:
-			state = "Pending"
-			phase = "Pending"
-			requeue = true
-		case kubevirtv1.Scheduling:
-			state = "Scheduling"
-			phase = "Scheduling"
-			requeue = true
-		case kubevirtv1.Scheduled:
-			state = "Scheduled"
-			phase = "Scheduled"
-			requeue = true
-		case kubevirtv1.Succeeded:
-			state = "Succeeded"
-			phase = "Succeeded"
-		case kubevirtv1.Failed:
-			state = "Failed"
-			phase = "Failed"
-		default:
-			state = "Unknown"
-			phase = "Unknown"
-			requeue = true
-		}
-
-		logger.Info("VMI status", "phase", vmi.Status.Phase, "state", state)
-
-		// Check for VMI errors that might prevent startup
-		if err := m.checkVMIErrorsAndUpdateStatus(ctx, machine, vmi); err != nil {
-			logger.Error(err, "Failed to check VMI errors")
-			// Continue processing even if error checking fails
-		}
-
-		// Additional VMI status information
-		if len(vmi.Status.Conditions) > 0 {
-			for _, condition := range vmi.Status.Conditions {
-				logger.Info("VMI condition", "type", condition.Type, "status", condition.Status, "reason", condition.Reason)
-			}
-		}
-
-	} else {
-		// Fall back to VM status if VMI doesn't exist yet
-		if vm.Status.Ready {
-			state = "Running"
-			phase = "Running"
-		} else if vm.Status.Created {
-			state = "Pending"
-			phase = "Pending"
-			requeue = true
-		} else {
-			state = "Pending"
-			phase = "Pending"
-			requeue = true
-		}
-
-		logger.Info("VM status (no VMI)", "ready", vm.Status.Ready, "created", vm.Status.Created, "state", state)
-
-		// Check for VM errors that might prevent VMI creation
-		if err := m.checkVMErrorsAndUpdateStatus(ctx, machine, vm); err != nil {
-			logger.Error(err, "Failed to check VM errors")
-			// Continue processing even if error checking fails
-		}
-	}
-
-	// Update machine status fields
 	machine.Status.Phase = phase
 	machine.Status.State = state
 	machine.Status.Provider = "kubevirt"
 
-	// todo fetch datacenter region and zone
-
-	// Update machine status
 	if err := m.UpdateMachineStatus(ctx, machine, state); err != nil {
 		logger.Error(err, "Failed to update Machine status")
 		return ctrl.Result{}, err
 	}
-
 	if requeue {
-		// Requeue to check status again
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
-
 	return ctrl.Result{}, nil
+}
+
+// evaluateState determines the machine state/phase and performs ancillary updates (pod info & error checks)
+func (m *StatusManager) evaluateState(machine *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine, vmi *kubevirtv1.VirtualMachineInstance, vmiExists bool, ctx context.Context) (state, phase string, requeue bool) {
+	logger := log.FromContext(ctx)
+	if vmiExists {
+		state, phase, requeue = m.mapVMIPhase(vmi.Status.Phase)
+		if vmi.Status.Phase == kubevirtv1.Running {
+			if err := m.updatePodInformation(ctx, machine, vmi); err != nil {
+				logger.Error(err, "Failed to update pod information", "vmi", vmi.Name)
+			}
+		}
+		if err := m.checkVMIErrorsAndUpdateStatus(ctx, machine, vmi); err != nil {
+			logger.Error(err, "Failed to check VMI errors")
+		}
+		for i := range vmi.Status.Conditions {
+			c := vmi.Status.Conditions[i]
+			logger.Info("VMI condition", "type", c.Type, "status", c.Status, "reason", c.Reason)
+		}
+		return
+	}
+	// VM path (no VMI yet)
+	state, phase, requeue = m.mapVMStatus(vm)
+	if err := m.checkVMErrorsAndUpdateStatus(ctx, machine, vm); err != nil {
+		logger.Error(err, "Failed to check VM errors")
+	}
+	return
+}
+
+func (m *StatusManager) mapVMIPhase(phase kubevirtv1.VirtualMachineInstancePhase) (state, mappedPhase string, requeue bool) {
+	switch phase {
+	case kubevirtv1.Running:
+		return consts.MachineStateRunning, consts.MachinePhaseRunning, false
+	case kubevirtv1.Pending:
+		return consts.MachineStatePending, consts.MachinePhasePending, true
+	case kubevirtv1.Scheduling:
+		return consts.MachineStateScheduling, consts.MachinePhaseScheduling, true
+	case kubevirtv1.Scheduled:
+		return consts.MachineStateScheduled, consts.MachinePhaseScheduled, true
+	case kubevirtv1.Succeeded:
+		return consts.MachineStateSucceeded, consts.MachinePhaseSucceeded, false
+	case kubevirtv1.Failed:
+		return consts.MachineStateFailed, consts.MachinePhaseFailed, false
+	default:
+		return consts.MachineStateUnknown, consts.MachinePhaseUnknown, true
+	}
+}
+
+func (m *StatusManager) mapVMStatus(vm *kubevirtv1.VirtualMachine) (state, phase string, requeue bool) {
+	if vm.Status.Ready {
+		return consts.MachineStateRunning, consts.MachinePhaseRunning, false
+	}
+	if vm.Status.Created {
+		return consts.MachineStatePending, consts.MachinePhasePending, true
+	}
+	return consts.MachineStatePending, consts.MachinePhasePending, true
 }
 
 // checkVMIErrorsAndUpdateStatus checks for VMI errors and updates machine status accordingly
@@ -218,38 +188,38 @@ func (m *StatusManager) checkVMIErrorsAndUpdateStatus(ctx context.Context, machi
 	}
 
 	// If there are error events and VMI is in a problematic state, update status
-	if len(errorEvents) > 0 && (vmi.Status.Phase == kubevirtv1.Pending ||
-		vmi.Status.Phase == kubevirtv1.Failed ||
-		vmi.Status.Phase == kubevirtv1.Scheduling ||
-		vmi.Status.Phase == kubevirtv1.Scheduled) {
+	if len(errorEvents) > 0 {
+		switch vmi.Status.Phase {
+		case kubevirtv1.Pending, kubevirtv1.Failed, kubevirtv1.Scheduling, kubevirtv1.Scheduled:
 
-		machine.Status.State = "Failed"
-		machine.Status.Phase = "Failed"
+			machine.Status.State = consts.MachineStateFailed
+			machine.Status.Phase = consts.MachineStateFailed
 
-		// Update the status field with error information
-		errorSummary := fmt.Sprintf("VM startup failed - %d error(s) found: %s",
-			len(errorEvents),
-			strings.Join(errorEvents, "; "))
+			// Update the status field with error information
+			errorSummary := fmt.Sprintf("VM startup failed - %d error(s) found: %s",
+				len(errorEvents),
+				strings.Join(errorEvents, "; "))
 
-		// Truncate if too long to avoid status field size limits
-		if len(errorSummary) > 500 {
-			errorSummary = errorSummary[:497] + "..."
+			// Truncate if too long to avoid status field size limits
+			if len(errorSummary) > 500 {
+				errorSummary = errorSummary[:497] + "..."
+			}
+
+			// Store the error details in status fields that are available in the CRD
+			machine.Status.State = consts.MachineStateFailed
+			machine.Status.Phase = consts.MachineStateFailed
+
+			logger.Error(nil, "VMI has error events preventing startup",
+				"vmi", vmi.Name,
+				"errorCount", len(errorEvents),
+				"phase", vmi.Status.Phase,
+				"errorDetails", errorSummary)
+
+			// Use the proper failure fields that exist in the CRD schema
+			machine.Status.FailureMessage = &errorSummary
+			reason := "VMIError"
+			machine.Status.FailureReason = &reason
 		}
-
-		// Store the error details in status fields that are available in the CRD
-		machine.Status.State = "Failed"
-		machine.Status.Phase = "Failed"
-
-		logger.Error(nil, "VMI has error events preventing startup",
-			"vmi", vmi.Name,
-			"errorCount", len(errorEvents),
-			"phase", vmi.Status.Phase,
-			"errorDetails", errorSummary)
-
-		// Use the proper failure fields that exist in the CRD schema
-		machine.Status.FailureMessage = &errorSummary
-		reason := "VMIError"
-		machine.Status.FailureReason = &reason
 	}
 
 	return nil
@@ -268,8 +238,8 @@ func (m *StatusManager) checkVMErrorsAndUpdateStatus(ctx context.Context, machin
 
 	// If there are error events and VM is not ready, update status
 	if len(errorEvents) > 0 && !vm.Status.Ready {
-		machine.Status.State = "Failed"
-		machine.Status.Phase = "Failed"
+		machine.Status.State = consts.MachineStateFailed
+		machine.Status.Phase = consts.MachineStateFailed
 
 		// Update the status field with error information
 		errorSummary := fmt.Sprintf("VM creation failed - %d error(s) found: %s",

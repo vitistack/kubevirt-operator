@@ -23,6 +23,7 @@ import (
 	"github.com/spf13/viper"
 	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/internal/consts"
+	"github.com/vitistack/kubevirt-operator/internal/machine/network"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,7 +37,8 @@ import (
 // VMManager handles VirtualMachine-related operations
 type VMManager struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme         *runtime.Scheme
+	NetworkManager *network.NetworkManager
 }
 
 // NewManager creates a new VM manager
@@ -48,7 +50,7 @@ func NewManager(c client.Client, scheme *runtime.Scheme) *VMManager {
 }
 
 // CreateVirtualMachine creates a KubeVirt VirtualMachine with the specified disks and volumes
-func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string, pvcNames []string) (*kubevirtv1.VirtualMachine, error) {
+func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string, pvcNames []string, networkConfiguration *kubevirtv1.Network) (*kubevirtv1.VirtualMachine, error) {
 	logger := log.FromContext(ctx)
 
 	// Build disks and volumes from the disk specs
@@ -61,6 +63,8 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 	// Using RunStrategyAlways to ensure the VM starts automatically (replaces deprecated Running: true)
 	runStrategy := kubevirtv1.RunStrategyAlways
 	cpuModel := viper.GetString(consts.CPU_MODEL)
+
+	networkBootOrder := uint(2)
 
 	vm := &kubevirtv1.VirtualMachine{
 		ObjectMeta: metav1.ObjectMeta{
@@ -93,7 +97,20 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 						},
 						Devices: kubevirtv1.Devices{
 							Disks: disks,
+							Interfaces: []kubevirtv1.Interface{
+								{
+									Name:  networkConfiguration.Name,
+									Model: kubevirtv1.VirtIO,
+									InterfaceBindingMethod: kubevirtv1.InterfaceBindingMethod{
+										Bridge: &kubevirtv1.InterfaceBridge{},
+									},
+									BootOrder: &networkBootOrder,
+								},
+							},
 						},
+					},
+					Networks: []kubevirtv1.Network{
+						*networkConfiguration,
 					},
 					Volumes: volumes,
 				},
@@ -117,14 +134,15 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 // calculateResourceRequirements determines CPU and memory requirements based on machine spec
 func (m *VMManager) calculateResourceRequirements(machine *vitistackv1alpha1.Machine) (memoryRequest, cpuRequest string) {
 	// Default resource values based on machine spec
-	memoryRequest = "1Gi"
+	oneGi := "1Gi"
+	memoryRequest = oneGi
 	cpuRequest = "1"
 
 	// Use simple defaults based on machine type from the external CRD
 	if machine.Spec.InstanceType != "" {
 		switch machine.Spec.InstanceType {
 		case "small":
-			memoryRequest = "1Gi"
+			memoryRequest = oneGi
 			cpuRequest = "1"
 		case "medium":
 			memoryRequest = "2Gi"
@@ -133,7 +151,7 @@ func (m *VMManager) calculateResourceRequirements(machine *vitistackv1alpha1.Mac
 			memoryRequest = "4Gi"
 			cpuRequest = "4"
 		default:
-			memoryRequest = "1Gi"
+			memoryRequest = oneGi
 			cpuRequest = "1"
 		}
 	}
@@ -151,8 +169,16 @@ func (m *VMManager) calculateResourceRequirements(machine *vitistackv1alpha1.Mac
 
 // buildDisksAndVolumes creates disk and volume specifications for the VM
 func (m *VMManager) buildDisksAndVolumes(machine *vitistackv1alpha1.Machine, pvcNames []string) ([]kubevirtv1.Disk, []kubevirtv1.Volume) {
-	var disks []kubevirtv1.Disk
-	var volumes []kubevirtv1.Volume
+	l := len(machine.Spec.Disks)
+	// Always allocate with capacity (>=1 for default root case)
+	capSize := l
+	if capSize == 0 {
+		capSize = 1
+	}
+	disks := make([]kubevirtv1.Disk, 0, capSize)
+	volumes := make([]kubevirtv1.Volume, 0, capSize)
+
+	bootorder := uint(1) // Default boot order for the first disk
 
 	// If no disks are specified in the spec, create a default root disk
 	if len(machine.Spec.Disks) == 0 {
@@ -163,6 +189,7 @@ func (m *VMManager) buildDisksAndVolumes(machine *vitistackv1alpha1.Machine, pvc
 					Bus: "virtio",
 				},
 			},
+			BootOrder: &bootorder,
 		})
 
 		volumes = append(volumes, kubevirtv1.Volume{
@@ -192,7 +219,7 @@ func (m *VMManager) buildDisksAndVolumes(machine *vitistackv1alpha1.Machine, pvc
 		var busType kubevirtv1.DiskBus = "virtio"
 		if diskSpec.Type != "" {
 			// Map disk types to appropriate bus types
-			switch diskSpec.Type { //todo
+			switch diskSpec.Type { // TODO: extend mapping if new types introduced
 			case "nvme":
 				busType = "virtio" // KubeVirt uses virtio for NVMe-style performance
 			case "sata":

@@ -13,14 +13,14 @@ jobs:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Configure Git for private repos
         run: |
           git config --global url.https://$GH_TOKEN@github.com/.insteadOf https://github.com/
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v5.5.0
         with:
           go-version-file: go.mod
           cache: true

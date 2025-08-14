@@ -29,6 +29,7 @@ import (
 	"github.com/vitistack/kubevirt-operator/pkg/clients"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	netattdefv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/controllers"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -69,6 +70,8 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(vitistackv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(kubevirtv1.AddToScheme(scheme))
+	// Register Multus NetworkAttachmentDefinition CRD types so we can list them
+	utilruntime.Must(netattdefv1.AddToScheme(scheme))
 
 	// +kubebuilder:scaffold:scheme
 }

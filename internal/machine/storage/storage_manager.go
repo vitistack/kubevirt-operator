@@ -59,7 +59,8 @@ func (m *StorageManager) GetDefaultStorageClass(ctx context.Context) (string, er
 	}
 
 	// Look for the default storage class
-	for _, sc := range storageClasses.Items {
+	for i := range storageClasses.Items { // index loop avoids copying struct
+		sc := &storageClasses.Items[i]
 		if sc.Annotations != nil {
 			if isDefault, exists := sc.Annotations["storageclass.kubernetes.io/is-default-class"]; exists && isDefault == "true" {
 				logger.Info("Found default storage class", "storageClass", sc.Name)
@@ -82,13 +83,12 @@ func (m *StorageManager) CreatePVCsFromDiskSpecs(ctx context.Context, machine *v
 		return nil, fmt.Errorf("failed to get default storage class: %w", err)
 	}
 
-	var pvcNames []string
+	pvcNames := make([]string, 0, max(1, len(machine.Spec.Disks)))
 
 	// If no disks are specified in the spec, create a default root disk
 	if len(machine.Spec.Disks) == 0 {
 		pvcName := fmt.Sprintf("%s-root-pvc", vmName)
-		_, err := m.createSinglePVC(ctx, machine, pvcName, "10Gi", defaultStorageClass, true)
-		if err != nil {
+		if err := m.createSinglePVC(ctx, machine, pvcName, "10Gi", defaultStorageClass, true); err != nil {
 			return nil, fmt.Errorf("failed to create default root PVC: %w", err)
 		}
 		pvcNames = append(pvcNames, pvcName)
@@ -96,7 +96,8 @@ func (m *StorageManager) CreatePVCsFromDiskSpecs(ctx context.Context, machine *v
 	}
 
 	// Create PVCs for each disk in the spec
-	for i, disk := range machine.Spec.Disks {
+	for i := range machine.Spec.Disks {
+		disk := &machine.Spec.Disks[i]
 		var pvcName string
 		if disk.Name != "" {
 			pvcName = fmt.Sprintf("%s-%s-pvc", vmName, disk.Name)
@@ -107,8 +108,7 @@ func (m *StorageManager) CreatePVCsFromDiskSpecs(ctx context.Context, machine *v
 		// Convert sizeGB to storage size string
 		storageSize := fmt.Sprintf("%dGi", disk.SizeGB)
 
-		_, err := m.createSinglePVC(ctx, machine, pvcName, storageSize, defaultStorageClass, disk.Boot)
-		if err != nil {
+		if err := m.createSinglePVC(ctx, machine, pvcName, storageSize, defaultStorageClass, disk.Boot); err != nil {
 			return nil, fmt.Errorf("failed to create PVC %s: %w", pvcName, err)
 		}
 
@@ -120,7 +120,7 @@ func (m *StorageManager) CreatePVCsFromDiskSpecs(ctx context.Context, machine *v
 }
 
 // createSinglePVC creates a single PVC with the specified parameters
-func (m *StorageManager) createSinglePVC(ctx context.Context, machine *vitistackv1alpha1.Machine, pvcName, storageSize, storageClass string, isBoot bool) (*corev1.PersistentVolumeClaim, error) {
+func (m *StorageManager) createSinglePVC(ctx context.Context, machine *vitistackv1alpha1.Machine, pvcName, storageSize, storageClass string, isBoot bool) error {
 	logger := log.FromContext(ctx)
 
 	labels := map[string]string{
@@ -153,15 +153,15 @@ func (m *StorageManager) createSinglePVC(ctx context.Context, machine *vitistack
 
 	// Set Machine as the owner of the PVC - note: this needs the scheme from the reconciler
 	if err := controllerutil.SetControllerReference(machine, pvc, m.Scheme); err != nil {
-		return nil, err
+		return err
 	}
 
 	if err := m.Create(ctx, pvc); err != nil {
-		return nil, err
+		return err
 	}
 
 	logger.Info("Successfully created PVC", "pvc", pvc.Name, "size", storageSize, "storageClass", storageClass)
-	return pvc, nil
+	return nil
 }
 
 // DeleteAssociatedPVCs deletes all PVCs associated with a machine
@@ -183,9 +183,10 @@ func (m *StorageManager) DeleteAssociatedPVCs(ctx context.Context, machine *viti
 		return err
 	}
 
-	// Delete each PVC
-	for _, pvc := range pvcList.Items {
-		if err := m.Delete(ctx, &pvc); err != nil {
+	// Delete each PVC (index loop to avoid copying large structs each iteration)
+	for i := range pvcList.Items {
+		pvc := &pvcList.Items[i]
+		if err := m.Delete(ctx, pvc); err != nil {
 			logger.Error(err, "Failed to delete PVC", "pvc", pvc.Name)
 			return err
 		}

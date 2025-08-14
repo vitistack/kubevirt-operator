@@ -46,7 +46,6 @@ linters:
     - revive # Fast, configurable, linter
     - unconvert # Remove unnecessary type conversions
     - unparam # Find unused function parameters
-    - whitespace # Check whitespace issues
 
   settings:
     gocyclo:

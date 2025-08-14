@@ -263,15 +263,27 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+GOSEC ?= $(LOCALBIN)/gosec
 
 ## Tool Versions
-KUSTOMIZE_VERSION ?= v5.6.0
+KUSTOMIZE_VERSION ?= v5.7.1
 CONTROLLER_TOOLS_VERSION ?= v0.18.0
 #ENVTEST_VERSION is the version of controller-runtime release branch to fetch the envtest setup script (i.e. release-0.20)
 ENVTEST_VERSION ?= $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller-runtime | awk -F'[v.]' '{printf "release-%d.%d", $$2, $$3}')
 #ENVTEST_K8S_VERSION is the version of Kubernetes to use for setting up ENVTEST binaries (i.e. 1.31)
 ENVTEST_K8S_VERSION ?= $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
 GOLANGCI_LINT_VERSION ?= v2.1.6
+GOSEC_VERSION ?= v2.22.7
+# Dynamically derived versions (can be overridden)
+KUBEVIRT_VERSION ?= $(shell curl -s https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt)
+CDI_VERSION ?= $(shell curl -s https://api.github.com/repos/kubevirt/containerized-data-importer/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+
+# Force reinstallation of golangci-lint with the currently active Go toolchain
+.PHONY: golangci-lint-reinstall
+golangci-lint-reinstall: ## Force reinstall golangci-lint (use if Go version changed)
+	@echo "Reinstalling golangci-lint $(GOLANGCI_LINT_VERSION) with Go $$(go version | awk '{print $$3}')"
+	rm -f $(GOLANGCI_LINT) $(GOLANGCI_LINT)-$(GOLANGCI_LINT_VERSION) || true
+	$(MAKE) golangci-lint
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -300,6 +312,30 @@ $(ENVTEST): $(LOCALBIN)
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
 	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+
+.PHONY: install-security-scanner
+install-security-scanner: $(GOSEC) ## Install gosec security scanner locally (static analysis for security issues)
+$(GOSEC): $(LOCALBIN)
+	@set -e; echo "Attempting to install gosec $(GOSEC_VERSION)"; \
+	if ! GOBIN=$(LOCALBIN) go install github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION) 2>/dev/null; then \
+		echo "Primary install failed, attempting install from @main (compatibility fallback)"; \
+		if ! GOBIN=$(LOCALBIN) go install github.com/securego/gosec/v2/cmd/gosec@main; then \
+			echo "gosec installation failed for versions $(GOSEC_VERSION) and @main"; \
+			exit 1; \
+		fi; \
+	fi; \
+	echo "gosec installed at $(GOSEC)"; \
+	chmod +x $(GOSEC)
+
+##@ Security
+.PHONY: go-security-scan
+go-security-scan: install-security-scanner ## Run gosec security scan (fails on findings)
+	$(GOSEC) ./...
+
+.PHONY: go-security-scan-docker
+go-security-scan-docker: ## Run gosec scan using official container (alternative if local install fails)
+	@echo "Running gosec via Docker container..."; \
+	$(CONTAINER_TOOL) run --rm -v $(PWD):/workspace -w /workspace securego/gosec/gosec:latest ./...
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
@@ -424,12 +460,11 @@ KUBEVIRTNAMESPACE := kubevirt
 .PHONY: k8s-install-kubevirt
 k8s-install-kubevirt: ## Install KubeVirt operator and CRDs into the K8s cluster specified in ~/.kube/config.
 	@echo -e "Installing KubeVirt operator and CRDs..."
-	$(eval VERSION=$(shell curl -s https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt))
-	@echo -e "Using KubeVirt version: $(VERSION)"
+	@echo -e "Using KubeVirt version: $(KUBEVIRT_VERSION)"
 	$(KUBECTL) create namespace kubevirt ; \
 	$(KUBECTL) label namespace kubevirt pod-security.kubernetes.io/enforce=privileged; \
-	$(KUBECTL) apply -f https://github.com/kubevirt/kubevirt/releases/download/$(VERSION)/kubevirt-operator.yaml
-	$(KUBECTL) apply -f https://github.com/kubevirt/kubevirt/releases/download/$(VERSION)/kubevirt-cr.yaml
+	$(KUBECTL) apply -f https://github.com/kubevirt/kubevirt/releases/download/$(KUBEVIRT_VERSION)/kubevirt-operator.yaml
+	$(KUBECTL) apply -f https://github.com/kubevirt/kubevirt/releases/download/$(KUBEVIRT_VERSION)/kubevirt-cr.yaml
 	
 	@echo -e "🔄 Waiting for KubeVirt CR to become available..."
 	@RESOURCE_NAME=$$(kubectl get kubevirt -n $(KUBEVIRTNAMESPACE) -o jsonpath="{.items[0].metadata.name}") && \
@@ -450,12 +485,11 @@ k8s-install-kubevirt: ## Install KubeVirt operator and CRDs into the K8s cluster
 .PHONY: k8s-uninstall-kubevirt
 k8s-uninstall-kubevirt: ## Uninstall KubeVirt operator and CRDs from the K8s cluster specified in ~/.kube/config.
 	@echo -e "Uninstalling KubeVirt operator and CRDs..."
-	$(eval VERSION=$(shell curl -s https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt))
-	@echo -e "Using KubeVirt version: $(VERSION)"
+	@echo -e "Using KubeVirt version: $(KUBEVIRT_VERSION)"
 	@echo -e "Deleting KubeVirt CRDs..."
-	$(KUBECTL) delete -f https://github.com/kubevirt/kubevirt/releases/download/$(VERSION)/kubevirt-operator.yaml
+	$(KUBECTL) delete -f https://github.com/kubevirt/kubevirt/releases/download/$(KUBEVIRT_VERSION)/kubevirt-operator.yaml
 	@echo -e "Deleting KubeVirt operator..."
-	$(KUBECTL) delete -f https://github.com/kubevirt/kubevirt/releases/download/$(VERSION)/kubevirt-cr.yaml
+	$(KUBECTL) delete -f https://github.com/kubevirt/kubevirt/releases/download/$(KUBEVIRT_VERSION)/kubevirt-cr.yaml
 	@echo -e "Deleting KubeVirt namespace..."
 	$(KUBECTL) delete namespace $(KUBEVIRTNAMESPACE)
 	@echo -e "✅ KubeVirt operator and CRDs uninstalled."
@@ -470,15 +504,24 @@ k8s-kubevirt-emulation-patch: ## Patch cluster to support KubeVirt.
 .PHONY: k8s-install-kubevirt-containerized-data-importer
 k8s-install-kubevirt-containerized-data-importer: ## Install KubeVirt CDI operator and CRDs into the K8s cluster specified in ~/.kube/config.
 	@echo -e "Installing KubeVirt Containerized data importer operator and CRDs..."
-	$(eval VERSION=$(shell curl -s https://api.github.com/repos/kubevirt/containerized-data-importer/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'))
-	@echo -e "Using CDI version: $(VERSION)"
-	$(KUBECTL) create -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-operator.yaml
-	$(KUBECTL) create -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-cr.yaml
+	@echo -e "Using CDI version: $(CDI_VERSION)"
+	$(KUBECTL) create -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(CDI_VERSION)/cdi-operator.yaml
+	$(KUBECTL) create -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(CDI_VERSION)/cdi-cr.yaml
 
 .PHONY: k8s-uninstall-kubevirt-containerized-data-importer
-k8s-uninstall-kubevirt-containerized-data-importer: ## Install KubeVirt CDI operator and CRDs into the K8s cluster specified in ~/.kube/config.
+k8s-uninstall-kubevirt-containerized-data-importer: ## Uninstall KubeVirt CDI operator and CRDs from the cluster.
 	@echo -e "Uninstalling KubeVirt Containerized data importer operator and CRDs..."
-	$(eval VERSION=$(shell curl -s https://api.github.com/repos/kubevirt/containerized-data-importer/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'))
-	@echo -e "Using CDI version: $(VERSION)"
-	$(KUBECTL) delete -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-operator.yaml
-	$(KUBECTL) delete -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(VERSION)/cdi-cr.yaml
+	@echo -e "Using CDI version: $(CDI_VERSION)"
+	$(KUBECTL) delete -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(CDI_VERSION)/cdi-operator.yaml
+	$(KUBECTL) delete -f https://github.com/kubevirt/containerized-data-importer/releases/download/$(CDI_VERSION)/cdi-cr.yaml
+
+.PHONY: versions
+versions: ## Print key tool and dependency versions used by the Makefile
+	@echo "KUSTOMIZE_VERSION=$(KUSTOMIZE_VERSION)"
+	@echo "CONTROLLER_TOOLS_VERSION=$(CONTROLLER_TOOLS_VERSION)"
+	@echo "ENVTEST_VERSION=$(ENVTEST_VERSION)"
+	@echo "ENVTEST_K8S_VERSION=$(ENVTEST_K8S_VERSION)"
+	@echo "GOLANGCI_LINT_VERSION=$(GOLANGCI_LINT_VERSION)"
+	@echo "GOSEC_VERSION=$(GOSEC_VERSION)"
+	@echo "KUBEVIRT_VERSION=$(KUBEVIRT_VERSION)"
+	@echo "CDI_VERSION=$(CDI_VERSION)"

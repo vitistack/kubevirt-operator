@@ -30,11 +30,13 @@ import (
 
 	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/internal/machine/events"
+	"github.com/vitistack/kubevirt-operator/internal/machine/network"
 	"github.com/vitistack/kubevirt-operator/internal/machine/status"
 	"github.com/vitistack/kubevirt-operator/internal/machine/storage"
 	"github.com/vitistack/kubevirt-operator/internal/machine/vm"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	kubevirtv1 "kubevirt.io/api/core/v1"
@@ -55,6 +57,7 @@ type MachineReconciler struct {
 	VMManager      *vm.VMManager
 	StatusManager  *status.StatusManager
 	EventsManager  *events.EventsManager
+	NetworkManager *network.NetworkManager
 }
 
 const (
@@ -71,98 +74,137 @@ const (
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups=k8s.cni.cncf.io,resources=network-attachment-definitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=storage.k8s.io,resources=storageclasses,verbs=get;list;watch
 
 func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Fetch the Machine instance
-	machine := &vitistackv1alpha1.Machine{}
-	err := r.Get(ctx, req.NamespacedName, machine)
+	machine, result, stop, err := r.fetchAndInitMachine(ctx, req)
+	if stop || err != nil {
+		return result, err
+	}
+
+	virtualmachine, vmName, result, stop, err := r.ensureVirtualMachine(ctx, machine)
+	if stop || err != nil {
+		return result, err
+	}
+
+	vmi, vmiExists, err := r.getVMI(ctx, vmName, machine.Namespace)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			// Machine resource not found. Ignoring since object must be deleted
-			logger.Info("Machine resource not found. Ignoring since object must be deleted")
-			return ctrl.Result{}, nil
-		}
-		// Error reading the object - requeue the request
-		logger.Error(err, "Failed to get Machine")
+		logger.Error(err, "Failed to get VirtualMachineInstance")
 		return ctrl.Result{}, err
 	}
 
-	// Check if the Machine is being deleted
-	if machine.GetDeletionTimestamp() != nil {
-		return r.handleDeletion(ctx, machine)
+	return r.StatusManager.UpdateMachineStatusFromVMAndVMI(ctx, machine, virtualmachine, vmi, vmiExists)
+}
+
+// fetchAndInitMachine retrieves the Machine and handles deletion/finalizer logic.
+// Returns: machine, result, stopReconcile, error
+func (r *MachineReconciler) fetchAndInitMachine(ctx context.Context, req ctrl.Request) (*vitistackv1alpha1.Machine, ctrl.Result, bool, error) {
+	logger := log.FromContext(ctx)
+	machine := &vitistackv1alpha1.Machine{}
+	if err := r.Get(ctx, req.NamespacedName, machine); err != nil {
+		if errors.IsNotFound(err) {
+			logger.Info("Machine resource not found")
+			return nil, ctrl.Result{}, true, nil
+		}
+		logger.Error(err, "Failed to get Machine")
+		return nil, ctrl.Result{}, true, err
 	}
 
-	// Add finalizer if not present
+	if machine.GetDeletionTimestamp() != nil {
+		if err := r.handleDeletion(ctx, machine); err != nil {
+			return machine, ctrl.Result{}, true, err
+		}
+		return machine, ctrl.Result{}, true, nil
+	}
+
 	if !controllerutil.ContainsFinalizer(machine, MachineFinalizer) {
 		controllerutil.AddFinalizer(machine, MachineFinalizer)
 		if err := r.Update(ctx, machine); err != nil {
 			logger.Error(err, "Failed to add finalizer to Machine")
-			return ctrl.Result{}, err
+			return machine, ctrl.Result{}, true, err
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return machine, ctrl.Result{Requeue: true}, true, nil
 	}
-
-	// Create or update the KubeVirt VirtualMachine
-	virtualmachine := &kubevirtv1.VirtualMachine{}
-	vmName := fmt.Sprintf("vm-%s", machine.Name)
-	vmNamespacedName := types.NamespacedName{
-		Name:      vmName,
-		Namespace: machine.Namespace,
-	}
-
-	err = r.Get(ctx, vmNamespacedName, virtualmachine)
-	if err != nil && errors.IsNotFound(err) {
-		// VirtualMachine doesn't exist, create it
-		// First create PVCs using the storage manager
-		pvcNames, err := r.StorageManager.CreatePVCsFromDiskSpecs(ctx, machine, vmName)
-		if err != nil {
-			logger.Error(err, "Failed to create PVCs")
-			if statusErr := r.StatusManager.UpdateMachineStatus(ctx, machine, "Failed"); statusErr != nil {
-				logger.Error(statusErr, "Failed to update machine status after PVC creation failure")
-			}
-			return ctrl.Result{RequeueAfter: time.Minute}, err
-		}
-
-		// Then create the VM using the VM manager
-		virtualmachine, err = r.VMManager.CreateVirtualMachine(ctx, machine, vmName, pvcNames)
-		if err != nil {
-			logger.Error(err, "Failed to create VirtualMachine")
-			if statusErr := r.StatusManager.UpdateMachineStatus(ctx, machine, "Failed"); statusErr != nil {
-				logger.Error(statusErr, "Failed to update machine status after VM creation failure")
-			}
-			return ctrl.Result{RequeueAfter: time.Minute}, err
-		}
-		logger.Info("Created VirtualMachine", "virtualmachine", virtualmachine.Name)
-	} else if err != nil {
-		logger.Error(err, "Failed to get VirtualMachine")
-		return ctrl.Result{}, err
-	}
-
-	// Get the VirtualMachineInstance if it exists
-	vmi := &kubevirtv1.VirtualMachineInstance{}
-	vmiNamespacedName := types.NamespacedName{
-		Name:      vmName,
-		Namespace: machine.Namespace,
-	}
-
-	vmiExists := false
-	err = r.Get(ctx, vmiNamespacedName, vmi)
-	if err != nil && !errors.IsNotFound(err) {
-		logger.Error(err, "Failed to get VirtualMachineInstance")
-		return ctrl.Result{}, err
-	} else if err == nil {
-		vmiExists = true
-		logger.Info("Found VirtualMachineInstance", "vmi", vmi.Name, "phase", vmi.Status.Phase)
-	}
-
-	// Update Machine status based on VirtualMachine and VirtualMachineInstance status
-	return r.StatusManager.UpdateMachineStatusFromVMAndVMI(ctx, machine, virtualmachine, vmi, vmiExists)
+	return machine, ctrl.Result{}, false, nil
 }
 
-func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitistackv1alpha1.Machine) (ctrl.Result, error) {
+// ensureVirtualMachine fetches or creates the backing VirtualMachine.
+// Returns: vm, vmName, result, stopReconcile, error
+func (r *MachineReconciler) ensureVirtualMachine(ctx context.Context, machine *vitistackv1alpha1.Machine) (*kubevirtv1.VirtualMachine, string, ctrl.Result, bool, error) {
+	logger := log.FromContext(ctx)
+	virtualmachine := &kubevirtv1.VirtualMachine{}
+	vmName := fmt.Sprintf("vm-%s", machine.Name)
+	vmKey := types.NamespacedName{Name: vmName, Namespace: machine.Namespace}
+
+	if err := r.Get(ctx, vmKey, virtualmachine); err != nil {
+		if !errors.IsNotFound(err) {
+			logger.Error(err, "Failed to get VirtualMachine")
+			return nil, vmName, ctrl.Result{}, true, err
+		}
+		// Need to create VM
+		networkConfiguration, netErr := r.NetworkManager.GetNetworkConfiguration(ctx, machine)
+		if netErr != nil {
+			r.recordNetworkFailure(ctx, machine, netErr)
+			return nil, vmName, ctrl.Result{}, true, netErr
+		}
+		pvcNames, pvcErr := r.StorageManager.CreatePVCsFromDiskSpecs(ctx, machine, vmName)
+		if pvcErr != nil {
+			logger.Error(pvcErr, "Failed to create PVCs")
+			_ = r.StatusManager.UpdateMachineStatus(ctx, machine, "Failed")
+			return nil, vmName, ctrl.Result{RequeueAfter: time.Minute}, true, pvcErr
+		}
+		newVM, vmErr := r.VMManager.CreateVirtualMachine(ctx, machine, vmName, pvcNames, networkConfiguration)
+		if vmErr != nil {
+			logger.Error(vmErr, "Failed to create VirtualMachine")
+			_ = r.StatusManager.UpdateMachineStatus(ctx, machine, "Failed")
+			return nil, vmName, ctrl.Result{RequeueAfter: time.Minute}, true, vmErr
+		}
+		logger.Info("Created VirtualMachine", "virtualmachine", newVM.Name)
+		return newVM, vmName, ctrl.Result{}, false, nil
+	}
+	return virtualmachine, vmName, ctrl.Result{}, false, nil
+}
+
+// recordNetworkFailure updates machine status for network configuration errors.
+func (r *MachineReconciler) recordNetworkFailure(ctx context.Context, machine *vitistackv1alpha1.Machine, err error) {
+	logger := log.FromContext(ctx)
+	reason := "Failed to get network configuration in current namespace"
+	errorTitle := "NetworkConfigurationError"
+	logger.Error(err, reason)
+	if machine.Status.Phase != vitistackv1alpha1.MachinePhaseFailed {
+		machine.Status.Conditions = append(machine.Status.Conditions, vitistackv1alpha1.MachineCondition{
+			Type:    vitistackv1alpha1.ConditionUnknown,
+			Status:  string(metav1.ConditionFalse),
+			Reason:  reason,
+			Message: errorTitle,
+		})
+	}
+	machine.Status.Phase = vitistackv1alpha1.MachinePhaseFailed
+	machine.Status.LastUpdated = metav1.Now()
+	machine.Status.FailureMessage = &errorTitle
+	machine.Status.FailureReason = &reason
+	if statusErr := r.StatusManager.UpdateMachineStatus(ctx, machine, errorTitle); statusErr != nil {
+		logger.Error(statusErr, errorTitle)
+	}
+}
+
+// getVMI retrieves the VMI if it exists.
+func (r *MachineReconciler) getVMI(ctx context.Context, vmName, namespace string) (*kubevirtv1.VirtualMachineInstance, bool, error) {
+	vmi := &kubevirtv1.VirtualMachineInstance{}
+	key := types.NamespacedName{Name: vmName, Namespace: namespace}
+	if err := r.Get(ctx, key, vmi); err != nil {
+		if errors.IsNotFound(err) {
+			return vmi, false, nil
+		}
+		return nil, false, err
+	}
+	return vmi, true, nil
+}
+
+func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitistackv1alpha1.Machine) error {
 	logger := log.FromContext(ctx)
 
 	if controllerutil.ContainsFinalizer(machine, MachineFinalizer) {
@@ -179,29 +221,29 @@ func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitista
 			// VirtualMachine exists, delete it
 			if err := r.Delete(ctx, virtualMachine); err != nil {
 				logger.Error(err, "Failed to delete VirtualMachine")
-				return ctrl.Result{}, err
+				return err
 			}
 			logger.Info("Deleted VirtualMachine", "virtualmachine", virtualMachine.Name)
 		} else if !errors.IsNotFound(err) {
 			logger.Error(err, "Failed to get VirtualMachine for deletion")
-			return ctrl.Result{}, err
+			return err
 		}
 
 		// Delete all associated PVCs
 		if err := r.StorageManager.DeleteAssociatedPVCs(ctx, machine, vmName); err != nil {
 			logger.Error(err, "Failed to delete associated PVCs")
-			return ctrl.Result{}, err
+			return err
 		}
 
 		// Remove finalizer
 		controllerutil.RemoveFinalizer(machine, MachineFinalizer)
 		if err := r.Update(ctx, machine); err != nil {
 			logger.Error(err, "Failed to remove finalizer from Machine")
-			return ctrl.Result{}, err
+			return err
 		}
 	}
 
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // NewMachineReconciler creates a new MachineReconciler with initialized managers
@@ -216,6 +258,7 @@ func NewMachineReconciler(c client.Client, scheme *runtime.Scheme) *MachineRecon
 		VMManager:      vm.NewManager(c, scheme),
 		StatusManager:  statusManager,
 		EventsManager:  eventsManager,
+		NetworkManager: network.NewManager(c),
 	}
 }
 

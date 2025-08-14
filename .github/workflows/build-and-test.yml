@@ -21,14 +21,14 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Configure Git for private repos
         run: |
           git config --global url.https://$GH_TOKEN@github.com/.insteadOf https://github.com/
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v5.5.0
         with:
           go-version-file: go.mod
           cache: true
@@ -36,7 +36,7 @@ jobs:
 
       # Cache bin folder with tools and binaries
       - name: Cache bin folder
-        uses: actions/cache@v4
+        uses: actions/cache@v4.2.4
         with:
           path: bin
           key: ${{ runner.os }}-bin-${{ hashFiles('go.mod', 'go.sum', 'Makefile') }}
@@ -64,14 +64,14 @@ jobs:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Configure Git for private repos
         run: |
           git config --global url.https://$GH_TOKEN@github.com/.insteadOf https://github.com/
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v5.5.0
         with:
           go-version-file: go.mod
           cache: true
@@ -79,7 +79,7 @@ jobs:
 
       # Cache bin folder with tools and binaries
       - name: Cache bin folder
-        uses: actions/cache@v4
+        uses: actions/cache@v4.2.4
         with:
           path: bin
           key: ${{ runner.os }}-bin-${{ hashFiles('go.mod', 'go.sum', 'Makefile') }}
@@ -111,7 +111,7 @@ jobs:
           go tool cover -func=coverage.out
 
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: coverage
           path: coverage.out
@@ -126,14 +126,14 @@ jobs:
     # Run in parallel with build job
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Configure Git for private repos
         run: |
           git config --global url.https://$GH_TOKEN@github.com/.insteadOf https://github.com/
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v5.5.0
         with:
           go-version-file: go.mod
           cache: true
@@ -141,7 +141,7 @@ jobs:
 
       # Cache bin folder with tools and binaries
       - name: Cache bin folder
-        uses: actions/cache@v4
+        uses: actions/cache@v4.2.4
         with:
           path: bin
           key: ${{ runner.os }}-bin-${{ hashFiles('go.mod', 'go.sum', 'Makefile') }}

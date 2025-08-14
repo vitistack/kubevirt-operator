@@ -23,6 +23,7 @@ import (
 
 	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -42,141 +43,84 @@ func NewManager(c client.Client) *EventsManager {
 
 // GetVMIEvents fetches events related to a VirtualMachineInstance and returns error events
 func (m *EventsManager) GetVMIEvents(ctx context.Context, vmi *kubevirtv1.VirtualMachineInstance, machine *vitistackv1alpha1.Machine) ([]string, error) {
-	logger := log.FromContext(ctx)
-
-	// Get events for the VMI
-	eventList := &corev1.EventList{}
-	listOpts := &client.ListOptions{
-		Namespace: vmi.Namespace,
-	}
-
-	if err := m.List(ctx, eventList, listOpts); err != nil {
-		logger.Error(err, "Failed to list events for VMI", "vmi", vmi.Name)
-		return nil, err
-	}
-
-	var errorEvents []string
-	for _, event := range eventList.Items {
-		// Filter events related to this VMI
-		if event.InvolvedObject.Name != vmi.Name ||
-			event.InvolvedObject.Kind != "VirtualMachineInstance" ||
-			event.InvolvedObject.UID != vmi.UID {
-			continue
-		}
-
-		// Only consider events that occurred after the machine was created
-		// This helps avoid stale events from previous instances
-		if event.FirstTimestamp.Before(&machine.CreationTimestamp) {
-			continue
-		}
-
-		// Also filter by VMI creation time to be extra sure
-		if !vmi.CreationTimestamp.IsZero() && event.FirstTimestamp.Before(&vmi.CreationTimestamp) {
-			continue
-		}
-
-		// Check for error events (Warning type or specific error reasons)
-		if event.Type == "Warning" ||
-			strings.Contains(strings.ToLower(event.Reason), "error") ||
-			strings.Contains(strings.ToLower(event.Reason), "failed") ||
-			strings.Contains(strings.ToLower(event.Message), "error") ||
-			strings.Contains(strings.ToLower(event.Message), "syncfailed") ||
-			strings.Contains(strings.ToLower(event.Message), "failed") {
-
-			// Format timestamp safely
-			timestamp := "unknown"
-			if !event.LastTimestamp.IsZero() {
-				timestamp = event.LastTimestamp.Format("15:04:05")
-			} else if !event.FirstTimestamp.IsZero() {
-				timestamp = event.FirstTimestamp.Format("15:04:05")
-			}
-
-			errorMsg := fmt.Sprintf("[%s] %s: %s",
-				timestamp,
-				event.Reason,
-				event.Message)
-			errorEvents = append(errorEvents, errorMsg)
-
-			logger.Info("Found VMI error event",
-				"vmi", vmi.Name,
-				"vmiUID", vmi.UID,
-				"eventUID", event.InvolvedObject.UID,
-				"reason", event.Reason,
-				"message", event.Message,
-				"type", event.Type,
-				"eventTime", event.FirstTimestamp)
-		}
-	}
-
-	return errorEvents, nil
+	return m.collectErrorEvents(ctx, vmi.Namespace, vmi.Name, string(vmi.UID), "VirtualMachineInstance", vmi.CreationTimestamp, machine.CreationTimestamp, true)
 }
 
 // GetVMEvents fetches events related to a VirtualMachine and returns error events
 func (m *EventsManager) GetVMEvents(ctx context.Context, vm *kubevirtv1.VirtualMachine, machine *vitistackv1alpha1.Machine) ([]string, error) {
+	return m.collectErrorEvents(ctx, vm.Namespace, vm.Name, string(vm.UID), "VirtualMachine", vm.CreationTimestamp, machine.CreationTimestamp, false)
+}
+
+// collectErrorEvents consolidates event collection and filtering logic for both VMIs and VMs
+func (m *EventsManager) collectErrorEvents(ctx context.Context, namespace, name, uid, kind string, objectCreation, machineCreation metav1.Time, includeSyncFailed bool) ([]string, error) {
 	logger := log.FromContext(ctx)
 
-	// Get events for the VM
 	eventList := &corev1.EventList{}
-	listOpts := &client.ListOptions{
-		Namespace: vm.Namespace,
-	}
-
-	if err := m.List(ctx, eventList, listOpts); err != nil {
-		logger.Error(err, "Failed to list events for VM", "vm", vm.Name)
+	if err := m.List(ctx, eventList, &client.ListOptions{Namespace: namespace}); err != nil {
+		logger.Error(err, "Failed to list events", "kind", kind, "name", name)
 		return nil, err
 	}
 
-	var errorEvents []string
-	for _, event := range eventList.Items {
-		// Filter events related to this VM
-		if event.InvolvedObject.Name != vm.Name ||
-			event.InvolvedObject.Kind != "VirtualMachine" ||
-			event.InvolvedObject.UID != vm.UID {
+	errorEvents := []string{}
+	for i := range eventList.Items { // index loop to avoid copying large structs
+		event := &eventList.Items[i]
+
+		// Fast pre-filter: involved object matching
+		if event.InvolvedObject.Name != name || event.InvolvedObject.Kind != kind || string(event.InvolvedObject.UID) != uid {
 			continue
 		}
 
-		// Only consider events that occurred after the machine was created
-		// This helps avoid stale events from previous instances
-		if event.FirstTimestamp.Before(&machine.CreationTimestamp) {
+		// Filter out stale events
+		if event.FirstTimestamp.Before(&machineCreation) {
+			continue
+		}
+		if !objectCreation.IsZero() && event.FirstTimestamp.Before(&objectCreation) {
 			continue
 		}
 
-		// Also filter by VM creation time to be extra sure
-		if !vm.CreationTimestamp.IsZero() && event.FirstTimestamp.Before(&vm.CreationTimestamp) {
+		if !isErrorEvent(event, includeSyncFailed) {
 			continue
 		}
 
-		// Check for error events (Warning type or specific error reasons)
-		if event.Type == "Warning" ||
-			strings.Contains(strings.ToLower(event.Reason), "error") ||
-			strings.Contains(strings.ToLower(event.Reason), "failed") ||
-			strings.Contains(strings.ToLower(event.Message), "error") ||
-			strings.Contains(strings.ToLower(event.Message), "failed") {
+		timestamp := formatEventTimestamp(event)
+		errorMsg := fmt.Sprintf("[%s] %s: %s", timestamp, event.Reason, event.Message)
+		errorEvents = append(errorEvents, errorMsg)
 
-			// Format timestamp safely
-			timestamp := "unknown"
-			if !event.LastTimestamp.IsZero() {
-				timestamp = event.LastTimestamp.Format("15:04:05")
-			} else if !event.FirstTimestamp.IsZero() {
-				timestamp = event.FirstTimestamp.Format("15:04:05")
-			}
-
-			errorMsg := fmt.Sprintf("[%s] %s: %s",
-				timestamp,
-				event.Reason,
-				event.Message)
-			errorEvents = append(errorEvents, errorMsg)
-
-			logger.Info("Found VM error event",
-				"vm", vm.Name,
-				"vmUID", vm.UID,
-				"eventUID", event.InvolvedObject.UID,
-				"reason", event.Reason,
-				"message", event.Message,
-				"type", event.Type,
-				"eventTime", event.FirstTimestamp)
-		}
+		logger.Info("Found error event",
+			"kind", kind,
+			"name", name,
+			"objectUID", uid,
+			"eventUID", event.InvolvedObject.UID,
+			"reason", event.Reason,
+			"message", event.Message,
+			"type", event.Type,
+			"eventTime", event.FirstTimestamp)
 	}
-
 	return errorEvents, nil
+}
+
+func isErrorEvent(event *corev1.Event, includeSyncFailed bool) bool {
+	if event.Type == "Warning" { // quick accept
+		return true
+	}
+	lr := strings.ToLower(event.Reason)
+	lm := strings.ToLower(event.Message)
+	if strings.Contains(lr, "error") || strings.Contains(lr, "failed") ||
+		strings.Contains(lm, "error") || strings.Contains(lm, "failed") {
+		return true
+	}
+	if includeSyncFailed && strings.Contains(lm, "syncfailed") {
+		return true
+	}
+	return false
+}
+
+func formatEventTimestamp(event *corev1.Event) string {
+	if !event.LastTimestamp.IsZero() {
+		return event.LastTimestamp.Format("15:04:05")
+	}
+	if !event.FirstTimestamp.IsZero() {
+		return event.FirstTimestamp.Format("15:04:05")
+	}
+	return "unknown"
 }
