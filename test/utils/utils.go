@@ -20,8 +20,11 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	ginkgo "github.com/onsi/ginkgo/v2" //nolint:golint,revive
@@ -38,6 +41,51 @@ const (
 
 func warnError(err error) {
 	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "warning: %v\n", err)
+}
+
+// validateHTTPSURL ensures the URL is https and host is in allow-list.
+func validateHTTPSURL(raw string, allowedHosts ...string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid url: %w", err)
+	}
+	if parsed.Scheme != "https" {
+		return fmt.Errorf("unsupported scheme: %s", parsed.Scheme)
+	}
+	for _, h := range allowedHosts {
+		if strings.EqualFold(parsed.Host, h) {
+			return nil
+		}
+	}
+	return fmt.Errorf("host %s not allowed", parsed.Host)
+}
+
+var imageNameRegexp = regexp.MustCompile(`^[a-z0-9./:@_-]+$`)
+
+func validateImageName(name string) error {
+	if !imageNameRegexp.MatchString(name) {
+		return fmt.Errorf("invalid image name: %s", name)
+	}
+	return nil
+}
+
+var nameRegexp = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
+
+func validateClusterName(name string) error {
+	if !nameRegexp.MatchString(name) {
+		return fmt.Errorf("invalid cluster name: %s", name)
+	}
+	return nil
+}
+
+func readFileSafe(filename string) ([]byte, error) {
+	clean := filepath.Clean(filename)
+	baseDir, _ := GetProjectDir()
+	if !strings.HasPrefix(clean, baseDir) {
+		return nil, fmt.Errorf("path outside project: %s", filename)
+	}
+	// #nosec G304 (validated path restricted to project directory)
+	return os.ReadFile(clean)
 }
 
 // Run executes the provided command within this context
@@ -62,16 +110,23 @@ func Run(cmd *exec.Cmd) (string, error) {
 
 // InstallPrometheusOperator installs the prometheus Operator to be used to export the enabled metrics.
 func InstallPrometheusOperator() error {
-	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
-	cmd := exec.Command("kubectl", "create", "-f", url)
+	resourceURL := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
+	if err := validateHTTPSURL(resourceURL, "github.com", "raw.githubusercontent.com"); err != nil {
+		return err
+	}
+	cmd := exec.Command("kubectl", "create", "-f", resourceURL) // #nosec G204 (url validated above, static binary)
 	_, err := Run(cmd)
 	return err
 }
 
 // UninstallPrometheusOperator uninstalls the prometheus
 func UninstallPrometheusOperator() {
-	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
-	cmd := exec.Command("kubectl", "delete", "-f", url)
+	resourceURL := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
+	if err := validateHTTPSURL(resourceURL, "github.com", "raw.githubusercontent.com"); err != nil {
+		warnError(err)
+		return
+	}
+	cmd := exec.Command("kubectl", "delete", "-f", resourceURL) // #nosec G204 (validated)
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
 	}
@@ -106,8 +161,12 @@ func IsPrometheusCRDsInstalled() bool {
 
 // UninstallCertManager uninstalls the cert manager
 func UninstallCertManager() {
-	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
-	cmd := exec.Command("kubectl", "delete", "-f", url)
+	resourceURL := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
+	if err := validateHTTPSURL(resourceURL, "github.com", "raw.githubusercontent.com"); err != nil {
+		warnError(err)
+		return
+	}
+	cmd := exec.Command("kubectl", "delete", "-f", resourceURL) // #nosec G204 (validated)
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
 	}
@@ -115,8 +174,11 @@ func UninstallCertManager() {
 
 // InstallCertManager installs the cert manager bundle.
 func InstallCertManager() error {
-	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
-	cmd := exec.Command("kubectl", "apply", "-f", url)
+	resourceURL := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
+	if err := validateHTTPSURL(resourceURL, "github.com", "raw.githubusercontent.com"); err != nil {
+		return err
+	}
+	cmd := exec.Command("kubectl", "apply", "-f", resourceURL) // #nosec G204 (validated)
 	if _, err := Run(cmd); err != nil {
 		return err
 	}
@@ -171,8 +233,14 @@ func LoadImageToKindClusterWithName(name string) error {
 	if v, ok := os.LookupEnv("KIND_CLUSTER"); ok {
 		cluster = v
 	}
+	if err := validateImageName(name); err != nil {
+		return err
+	}
+	if err := validateClusterName(cluster); err != nil {
+		return err
+	}
 	kindOptions := []string{"load", "docker-image", name, "--name", cluster}
-	cmd := exec.Command("kind", kindOptions...)
+	cmd := exec.Command("kind", kindOptions...) // #nosec G204 (validated args set)
 	_, err := Run(cmd)
 	return err
 }
@@ -204,9 +272,7 @@ func GetProjectDir() (string, error) {
 // UncommentCode searches for target in the file and remove the comment prefix
 // of the target content. The target content may span multiple lines.
 func UncommentCode(filename, target, prefix string) error {
-	// false positive
-	// nolint:gosec
-	content, err := os.ReadFile(filename)
+	content, err := readFileSafe(filename)
 	if err != nil {
 		return err
 	}
@@ -245,7 +311,5 @@ func UncommentCode(filename, target, prefix string) error {
 	if err != nil {
 		return err
 	}
-	// false positive
-	// nolint:gosec
-	return os.WriteFile(filename, out.Bytes(), 0644)
+	return os.WriteFile(filename, out.Bytes(), 0o600) // restrictive perms satisfy G306
 }
