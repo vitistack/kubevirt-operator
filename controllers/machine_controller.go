@@ -34,6 +34,7 @@ import (
 	"github.com/vitistack/kubevirt-operator/internal/machine/status"
 	"github.com/vitistack/kubevirt-operator/internal/machine/storage"
 	"github.com/vitistack/kubevirt-operator/internal/machine/vm"
+	"github.com/vitistack/kubevirt-operator/pkg/macaddress"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -58,6 +59,7 @@ type MachineReconciler struct {
 	StatusManager  *status.StatusManager
 	EventsManager  *events.EventsManager
 	NetworkManager *network.NetworkManager
+	MacGenerator   macaddress.MacAddressGenerator
 }
 
 const (
@@ -249,16 +251,18 @@ func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitista
 // NewMachineReconciler creates a new MachineReconciler with initialized managers
 func NewMachineReconciler(c client.Client, scheme *runtime.Scheme) *MachineReconciler {
 	eventsManager := events.NewManager(c)
+	macGenerator := macaddress.NewVitistackMacGenerator()
 	statusManager := status.NewManager(c, eventsManager)
 
 	return &MachineReconciler{
 		Client:         c,
 		Scheme:         scheme,
 		StorageManager: storage.NewManager(c, scheme),
-		VMManager:      vm.NewManager(c, scheme),
+		VMManager:      vm.NewManager(c, scheme, macGenerator),
 		StatusManager:  statusManager,
 		EventsManager:  eventsManager,
 		NetworkManager: network.NewManager(c),
+		MacGenerator:   macGenerator,
 	}
 }
 

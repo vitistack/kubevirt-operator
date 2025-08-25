@@ -19,11 +19,11 @@ package status
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
-	"github.com/go-logr/logr"
+	"net"
+
 	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/internal/machine/events"
 	"github.com/vitistack/kubevirt-operator/pkg/consts"
@@ -303,36 +303,68 @@ func (m *StatusManager) updatePodInformation(ctx context.Context, machine *vitis
 
 	logger.Info("Found Pod for VMI", "pod", matchedPod.Name, "namespace", matchedPod.Namespace, "hostIP", matchedPod.Status.HostIP, "podIP", matchedPod.Status.PodIP)
 
-	// Extract HostIP and PodIP from the Pod
-	hostIP := matchedPod.Status.HostIP
-	podIP := matchedPod.Status.PodIP
+	networkInterfaces := []vitistackv1alpha1.NetworkInterfaceStatus{}
 
-	// Update Machine status with Pod information
-	// We'll use existing IP address fields in the CRD for this information
-	// Since the CRD has ipAddresses array, we'll use that for podIP
-	// For hostIP, we can use a custom field or repurpose an existing one
+	// todo find out if we need to include the PodIp/ HostIp network interfaces
+	// networkInterfaces = append(networkInterfaces, vitistackv1alpha1.NetworkInterfaceStatus{
+	// 	Name:          "HostIp",
+	// 	MACAddress:    "",
+	// 	IPAddresses:   []string{matchedPod.Status.HostIP},
+	// 	IPv6Addresses: []string{},
+	// 	State:         "up",
+	// 	MTU:           0,
+	// 	Type:          "Host",
+	// })
 
-	addPodIPToMachineStatus(podIP, machine, logger)
+	// networkInterfaces = append(networkInterfaces, vitistackv1alpha1.NetworkInterfaceStatus{
+	// 	Name:          "PodIp",
+	// 	MACAddress:    "",
+	// 	IPAddresses:   []string{matchedPod.Status.PodIP},
+	// 	IPv6Addresses: []string{},
+	// 	State:         "up",
+	// 	MTU:           0,
+	// 	Type:          "Pod",
+	// })
 
-	// For hostIP, we can store it in the hostname field or create a custom way to track it
-	// Let's use the hostname field to store host information
-	if hostIP != "" {
-		addPodIPToMachineStatus(hostIP, machine, logger)
-	}
+	networkInterfaces = extractNetworkInterfacesFromVMI(vmi, networkInterfaces)
+
+	machine.Status.NetworkInterfaces = networkInterfaces
 
 	return nil
 }
 
-func addPodIPToMachineStatus(podIP string, machine *vitistackv1alpha1.Machine, logger logr.Logger) {
-	if podIP != "" {
-		// Add podIP to the ipAddresses if not already present
-		found := slices.Contains(machine.Status.IPAddresses, podIP)
-		if !found {
-			if machine.Status.IPAddresses == nil {
-				machine.Status.IPAddresses = []string{}
+func extractNetworkInterfacesFromVMI(vmi *kubevirtv1.VirtualMachineInstance, networkInterfaces []vitistackv1alpha1.NetworkInterfaceStatus) []vitistackv1alpha1.NetworkInterfaceStatus {
+	for _, networkInterface := range vmi.Status.Interfaces {
+		ipv4Addresses := []string{}
+		ipv6Addresses := []string{}
+		for _, ip := range networkInterface.IPs {
+			if parsedIP := net.ParseIP(ip); parsedIP != nil {
+				if parsedIP.To4() != nil {
+					ipv4Addresses = append(ipv4Addresses, ip)
+				} else {
+					ipv6Addresses = append(ipv6Addresses, ip)
+				}
+			} else {
+				fmt.Printf("%s is not a valid IP address\n", ip)
 			}
-			machine.Status.IPAddresses = append(machine.Status.IPAddresses, podIP)
-			logger.Info("Added Pod IP to Machine status", "podIP", podIP)
 		}
+
+		if networkInterface.MAC == "" || networkInterface.MAC == "00:00:00:00:00:00" {
+			continue
+		}
+
+		if len(ipv4Addresses) == 0 && len(ipv6Addresses) == 0 {
+			continue
+		}
+
+		networkInterfaces = append(networkInterfaces, vitistackv1alpha1.NetworkInterfaceStatus{
+			Name:          networkInterface.Name,
+			MACAddress:    networkInterface.MAC,
+			IPAddresses:   ipv4Addresses,
+			IPv6Addresses: ipv6Addresses,
+			State:         networkInterface.LinkState,
+			Type:          networkInterface.InfoSource,
+		})
 	}
+	return networkInterfaces
 }

@@ -24,6 +24,7 @@ import (
 	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/internal/consts"
 	"github.com/vitistack/kubevirt-operator/internal/machine/network"
+	"github.com/vitistack/kubevirt-operator/pkg/macaddress"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,13 +40,15 @@ type VMManager struct {
 	client.Client
 	Scheme         *runtime.Scheme
 	NetworkManager *network.NetworkManager
+	MacGenerator   macaddress.MacAddressGenerator
 }
 
 // NewManager creates a new VM manager
-func NewManager(c client.Client, scheme *runtime.Scheme) *VMManager {
+func NewManager(c client.Client, scheme *runtime.Scheme, macGenerator macaddress.MacAddressGenerator) *VMManager {
 	return &VMManager{
-		Client: c,
-		Scheme: scheme,
+		Client:       c,
+		Scheme:       scheme,
+		MacGenerator: macGenerator,
 	}
 }
 
@@ -65,6 +68,10 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 	cpuModel := viper.GetString(consts.CPU_MODEL)
 
 	networkBootOrder := uint(2)
+	macAddress, err := m.MacGenerator.GetMACAddress()
+	if err != nil {
+		return nil, err
+	}
 
 	vm := &kubevirtv1.VirtualMachine{
 		ObjectMeta: metav1.ObjectMeta{
@@ -104,7 +111,8 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 									InterfaceBindingMethod: kubevirtv1.InterfaceBindingMethod{
 										Bridge: &kubevirtv1.InterfaceBridge{},
 									},
-									BootOrder: &networkBootOrder,
+									BootOrder:  &networkBootOrder,
+									MacAddress: macAddress,
 								},
 							},
 						},
@@ -117,6 +125,9 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 			},
 		},
 	}
+
+	machine.Status.Phase = vitistackv1alpha1.MachinePhaseCreating
+	machine.Status.State = vitistackv1alpha1.MachineStatePending
 
 	// Set Machine as the owner of the VirtualMachine
 	if err := controllerutil.SetControllerReference(machine, vm, m.Scheme); err != nil {
