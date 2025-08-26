@@ -391,13 +391,18 @@ func extractDiskVolumesFromVMI(vmi *kubevirtv1.VirtualMachineInstance) ([]vitist
 				return nil, fmt.Errorf("failed to get disk size for volume %s", volume.Name)
 			}
 
+			accessModes := []string{}
+			for _, mode := range volume.PersistentVolumeClaimInfo.AccessModes {
+				accessModes = append(accessModes, string(mode))
+			}
+
 			diskVolumes = append(diskVolumes, vitistackv1alpha1.MachineStatusDisk{
-				Name:           volume.Name,
-				Device:         fmt.Sprintf("/dev/%s", volume.Target),
-				Type:           string(*volume.PersistentVolumeClaimInfo.VolumeMode),
-				MountPoint:     volume.PersistentVolumeClaimInfo.ClaimName,
-				Size:           diskSize,
-				FilesystemType: string(*volume.PersistentVolumeClaimInfo.VolumeMode),
+				Name:        volume.Name,
+				Device:      fmt.Sprintf("/dev/%s", volume.Target),
+				PVCName:     volume.PersistentVolumeClaimInfo.ClaimName,
+				VolumeMode:  string(*volume.PersistentVolumeClaimInfo.VolumeMode),
+				Size:        diskSize,
+				AccessModes: accessModes,
 			})
 		}
 	}

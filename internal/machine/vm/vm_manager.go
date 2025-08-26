@@ -127,7 +127,7 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 	}
 
 	machine.Status.Phase = vitistackv1alpha1.MachinePhaseCreating
-	machine.Status.State = vitistackv1alpha1.MachineStatePending
+	machine.Status.State = consts.MachineStatePending
 
 	// Set Machine as the owner of the VirtualMachine
 	if err := controllerutil.SetControllerReference(machine, vm, m.Scheme); err != nil {

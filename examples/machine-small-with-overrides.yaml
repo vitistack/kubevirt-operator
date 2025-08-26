@@ -1,0 +1,16 @@
+---
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-machine-small-ish
+spec:
+  # Using predefined small machine type
+  instanceType: "small"
+  # No resource overrides - will use defaults (1 GB RAM, 1 CPU)
+  name: "example-vm-small"
+  cpu:
+    # Override default CPU to 4 CPUs
+    cores: 4
+    sockets: 4
+    threadsPerCore: 2
+  memory: 4294967296 # 4 GB in bytes
