@@ -126,8 +126,8 @@ func (m *StatusManager) evaluateState(machine *vitistackv1alpha1.Machine, vm *ku
 	if vmiExists {
 		state, phase, requeue = m.mapVMIPhase(vmi.Status.Phase)
 		if vmi.Status.Phase == kubevirtv1.Running {
-			if err := m.updatePodInformation(ctx, machine, vmi); err != nil {
-				logger.Error(err, "Failed to update pod information", "vmi", vmi.Name)
+			if err := m.updateStatusFromPodVMVMIStatus(ctx, machine, vmi); err != nil {
+				logger.Error(err, "Failed to update vm and vmi status information", "vmi", vmi.Name)
 			}
 		}
 		if err := m.checkVMIErrorsAndUpdateStatus(ctx, machine, vmi); err != nil {
@@ -266,8 +266,8 @@ func (m *StatusManager) checkVMErrorsAndUpdateStatus(ctx context.Context, machin
 	return nil
 }
 
-// updatePodInformation fetches the Pod created by the VMI and extracts HostIP and PodIP
-func (m *StatusManager) updatePodInformation(ctx context.Context, machine *vitistackv1alpha1.Machine, vmi *kubevirtv1.VirtualMachineInstance) error {
+// updateStatusFromPodVMVMIStatus fetches the Pod created by the VMI and extracts HostIP and PodIP, and update status from VM
+func (m *StatusManager) updateStatusFromPodVMVMIStatus(ctx context.Context, machine *vitistackv1alpha1.Machine, vmi *kubevirtv1.VirtualMachineInstance) error {
 	logger := log.FromContext(ctx)
 
 	// Get all Pods in the VMI's namespace and find one that contains the VMI name
@@ -328,8 +328,20 @@ func (m *StatusManager) updatePodInformation(ctx context.Context, machine *vitis
 
 	networkInterfaces = extractNetworkInterfacesFromVMI(vmi, networkInterfaces)
 
+	privateIpAddresses := []string{}
+	for _, networkInterface := range networkInterfaces {
+		privateIpAddresses = append(privateIpAddresses, networkInterface.IPAddresses...)
+	}
+
+	machine.Status.PrivateIPAddresses = privateIpAddresses
 	machine.Status.NetworkInterfaces = networkInterfaces
 
+	diskVolumes, err := extractDiskVolumesFromVMI(vmi)
+	if err != nil {
+		return err
+	}
+
+	machine.Status.Disks = diskVolumes
 	return nil
 }
 
@@ -367,4 +379,27 @@ func extractNetworkInterfacesFromVMI(vmi *kubevirtv1.VirtualMachineInstance, net
 		})
 	}
 	return networkInterfaces
+}
+
+func extractDiskVolumesFromVMI(vmi *kubevirtv1.VirtualMachineInstance) ([]vitistackv1alpha1.MachineStatusDisk, error) {
+	var diskVolumes []vitistackv1alpha1.MachineStatusDisk
+	for _, volume := range vmi.Status.VolumeStatus {
+		if volume.Name != "" {
+
+			diskSize, ok := volume.PersistentVolumeClaimInfo.Capacity.Storage().AsInt64()
+			if !ok {
+				return nil, fmt.Errorf("failed to get disk size for volume %s", volume.Name)
+			}
+
+			diskVolumes = append(diskVolumes, vitistackv1alpha1.MachineStatusDisk{
+				Name:           volume.Name,
+				Device:         fmt.Sprintf("/dev/%s", volume.Target),
+				Type:           string(*volume.PersistentVolumeClaimInfo.VolumeMode),
+				MountPoint:     volume.PersistentVolumeClaimInfo.ClaimName,
+				Size:           diskSize,
+				FilesystemType: string(*volume.PersistentVolumeClaimInfo.VolumeMode),
+			})
+		}
+	}
+	return diskVolumes, nil
 }
