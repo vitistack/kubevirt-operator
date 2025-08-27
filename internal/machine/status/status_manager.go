@@ -280,19 +280,19 @@ func (m *StatusManager) updateStatusFromPodVMVMIStatus(ctx context.Context, mach
 	var matchedPod *corev1.Pod
 	for i := range podList.Items {
 		pod := &podList.Items[i]
-		if strings.Contains(pod.Name, vmi.Name) {
-			// Additional check to ensure this is a KubeVirt Pod by checking labels
-			if pod.Labels != nil {
-				if kubevirtDomain, exists := pod.Labels["kubevirt.io/domain"]; exists && kubevirtDomain == vmi.Name {
-					matchedPod = pod
-					break
-				}
-				// Fallback: check if it's a virt-launcher pod
-				if podType, exists := pod.Labels["kubevirt.io"]; exists && strings.Contains(podType, "virt-launcher") {
-					matchedPod = pod
-					break
-				}
-			}
+		if pod.Labels == nil {
+			// If there are no labels, we can't determine if this is a KubeVirt Pod
+			continue
+		}
+
+		value, ok := pod.Labels["source-machine"]
+		if !ok {
+			continue
+		}
+
+		if value == machine.Name {
+			matchedPod = pod
+			break
 		}
 	}
 
