@@ -304,32 +304,11 @@ func (m *StatusManager) updateStatusFromPodVMVMIStatus(ctx context.Context, mach
 	logger.Info("Found Pod for VMI", "pod", matchedPod.Name, "namespace", matchedPod.Namespace, "hostIP", matchedPod.Status.HostIP, "podIP", matchedPod.Status.PodIP)
 
 	networkInterfaces := []vitistackv1alpha1.NetworkInterfaceStatus{}
-
-	// todo find out if we need to include the PodIp/ HostIp network interfaces
-	// networkInterfaces = append(networkInterfaces, vitistackv1alpha1.NetworkInterfaceStatus{
-	// 	Name:          "HostIp",
-	// 	MACAddress:    "",
-	// 	IPAddresses:   []string{matchedPod.Status.HostIP},
-	// 	IPv6Addresses: []string{},
-	// 	State:         "up",
-	// 	MTU:           0,
-	// 	Type:          "Host",
-	// })
-
-	// networkInterfaces = append(networkInterfaces, vitistackv1alpha1.NetworkInterfaceStatus{
-	// 	Name:          "PodIp",
-	// 	MACAddress:    "",
-	// 	IPAddresses:   []string{matchedPod.Status.PodIP},
-	// 	IPv6Addresses: []string{},
-	// 	State:         "up",
-	// 	MTU:           0,
-	// 	Type:          "Pod",
-	// })
-
 	networkInterfaces = extractNetworkInterfacesFromVMI(vmi, networkInterfaces)
 
 	privateIpAddresses := []string{}
-	for _, networkInterface := range networkInterfaces {
+	for i := range networkInterfaces {
+		networkInterface := &networkInterfaces[i]
 		privateIpAddresses = append(privateIpAddresses, networkInterface.IPAddresses...)
 	}
 
@@ -346,10 +325,12 @@ func (m *StatusManager) updateStatusFromPodVMVMIStatus(ctx context.Context, mach
 }
 
 func extractNetworkInterfacesFromVMI(vmi *kubevirtv1.VirtualMachineInstance, networkInterfaces []vitistackv1alpha1.NetworkInterfaceStatus) []vitistackv1alpha1.NetworkInterfaceStatus {
-	for _, networkInterface := range vmi.Status.Interfaces {
+	for i := range vmi.Status.Interfaces {
+		networkInterface := &vmi.Status.Interfaces[i]
 		ipv4Addresses := []string{}
 		ipv6Addresses := []string{}
-		for _, ip := range networkInterface.IPs {
+		for j := range networkInterface.IPs {
+			ip := networkInterface.IPs[j]
 			if parsedIP := net.ParseIP(ip); parsedIP != nil {
 				if parsedIP.To4() != nil {
 					ipv4Addresses = append(ipv4Addresses, ip)
@@ -383,7 +364,8 @@ func extractNetworkInterfacesFromVMI(vmi *kubevirtv1.VirtualMachineInstance, net
 
 func extractDiskVolumesFromVMI(vmi *kubevirtv1.VirtualMachineInstance) ([]vitistackv1alpha1.MachineStatusDisk, error) {
 	var diskVolumes []vitistackv1alpha1.MachineStatusDisk
-	for _, volume := range vmi.Status.VolumeStatus {
+	for i := range vmi.Status.VolumeStatus {
+		volume := &vmi.Status.VolumeStatus[i]
 		if volume.Name != "" {
 
 			diskSize, ok := volume.PersistentVolumeClaimInfo.Capacity.Storage().AsInt64()
@@ -392,7 +374,8 @@ func extractDiskVolumesFromVMI(vmi *kubevirtv1.VirtualMachineInstance) ([]vitist
 			}
 
 			accessModes := []string{}
-			for _, mode := range volume.PersistentVolumeClaimInfo.AccessModes {
+			for j := range volume.PersistentVolumeClaimInfo.AccessModes {
+				mode := volume.PersistentVolumeClaimInfo.AccessModes[j]
 				accessModes = append(accessModes, string(mode))
 			}
 
