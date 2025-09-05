@@ -21,6 +21,7 @@ func Init() {
 	}
 
 	viper.SetDefault(consts.CPU_MODEL, cpuModel)
+	viper.SetDefault(consts.JSON_LOGGING, true)
 
 	viper.AutomaticEnv()
 }

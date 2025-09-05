@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/vitistack/common/pkg/loggers/vlog"
 	"github.com/vitistack/kubevirt-operator/pkg/clients"
-
-	"github.com/NorskHelsenett/ror/pkg/rlog"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -15,10 +14,10 @@ import (
 )
 
 func CheckPrerequisites() {
-	rlog.Info("Running prerequisite checks...")
+	vlog.Info("Running prerequisite checks...")
 	CheckCRDs()
 	CheckRunningKubeVirtVM()
-	rlog.Info("✅ Prerequisite checks passed")
+	vlog.Info("✅ Prerequisite checks passed")
 }
 
 func CheckCRDs() {
@@ -59,11 +58,11 @@ func CheckCRDs() {
 	// If we collected any errors, report them all together
 	if len(errors) > 0 {
 		errorMessage := fmt.Sprintf("Prerequisite checks failed:\n- %s", strings.Join(errors, "\n- "))
-		rlog.Error(errorMessage, nil)
+		vlog.Error(errorMessage, nil)
 		panic(errorMessage)
 	}
 
-	rlog.Info("✅ All prerequisite checks passed")
+	vlog.Info("✅ All prerequisite checks passed")
 }
 
 // checkGroupVersionCRDs checks for the existence of specific CRDs in a given API group version
@@ -86,7 +85,7 @@ func checkGroupVersionCRDs(errors []string, groupVersion string, requiredCRDs []
 		if !crdExists(resources, crdKind) {
 			errors = append(errors, fmt.Sprintf("%s CRD is not installed (group version: %s)", crdKind, groupVersion))
 		} else {
-			rlog.Info(fmt.Sprintf("✅ %s CRD is installed (group version: %s)", crdKind, groupVersion))
+			vlog.Info(fmt.Sprintf("✅ %s CRD is installed (group version: %s)", crdKind, groupVersion))
 		}
 	}
 
@@ -136,7 +135,7 @@ func CheckRunningKubeVirtVM() {
 				if deployment.Status.ReadyReplicas == 0 {
 					errors = append(errors, fmt.Sprintf("KubeVirt component '%s' in namespace '%s' is not ready (0 ready replicas)", component, namespace))
 				} else {
-					rlog.Info(fmt.Sprintf("✅ KubeVirt component '%s' in namespace '%s' is ready (%d/%d replicas)",
+					vlog.Info(fmt.Sprintf("✅ KubeVirt component '%s' in namespace '%s' is ready (%d/%d replicas)",
 						component, namespace, deployment.Status.ReadyReplicas, deployment.Status.Replicas))
 				}
 				continue
@@ -149,7 +148,7 @@ func CheckRunningKubeVirtVM() {
 				if daemonset.Status.NumberReady == 0 {
 					errors = append(errors, fmt.Sprintf("KubeVirt component '%s' in namespace '%s' is not ready (0 ready nodes)", component, namespace))
 				} else {
-					rlog.Info(fmt.Sprintf("✅ KubeVirt component '%s' in namespace '%s' is ready (%d/%d nodes)",
+					vlog.Info(fmt.Sprintf("✅ KubeVirt component '%s' in namespace '%s' is ready (%d/%d nodes)",
 						component, namespace, daemonset.Status.NumberReady, daemonset.Status.DesiredNumberScheduled))
 				}
 				continue
@@ -167,18 +166,18 @@ func CheckRunningKubeVirtVM() {
 		case !kubevirtCR:
 			errors = append(errors, "KubeVirt CR is not in Ready state")
 		default:
-			rlog.Info("✅ KubeVirt CR is in Ready state")
+			vlog.Info("✅ KubeVirt CR is in Ready state")
 		}
 	}
 
 	// If we collected any errors, report them all together
 	if len(errors) > 0 {
 		errorMessage := fmt.Sprintf("KubeVirt component checks failed:\n- %s", strings.Join(errors, "\n- "))
-		rlog.Error(errorMessage, nil)
+		vlog.Error(errorMessage, nil)
 		panic(errorMessage)
 	}
 
-	rlog.Info("✅ All KubeVirt components are running properly")
+	vlog.Info("✅ All KubeVirt components are running properly")
 }
 
 // checkKubeVirtCR checks if the KubeVirt CR is in Ready state using dynamic client

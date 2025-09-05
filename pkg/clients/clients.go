@@ -1,7 +1,7 @@
 package clients
 
 import (
-	"github.com/NorskHelsenett/ror/pkg/rlog"
+	"github.com/vitistack/common/pkg/loggers/vlog"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -18,7 +18,7 @@ var (
 func Init() {
 	k8sconfig, err := config.GetConfig()
 	if err != nil {
-		rlog.Error("Failed to get Kubernetes config", err)
+		vlog.Error("Failed to get Kubernetes config", err)
 		if err != nil {
 			panic(err)
 		}
@@ -26,7 +26,7 @@ func Init() {
 
 	Kubernetes, err = kubernetes.NewForConfig(k8sconfig)
 	if err != nil {
-		rlog.Error("Failed to create Kubernetes client", err)
+		vlog.Error("Failed to create Kubernetes client", err)
 		if err != nil {
 			panic(err)
 		}
@@ -34,7 +34,7 @@ func Init() {
 
 	DiscoveryClient, err = discovery.NewDiscoveryClientForConfig(k8sconfig)
 	if err != nil {
-		rlog.Error("Failed to create discovery client", err)
+		vlog.Error("Failed to create discovery client", err)
 		if err != nil {
 			panic(err)
 		}
@@ -42,7 +42,7 @@ func Init() {
 
 	DynamicClient, err = dynamic.NewForConfig(k8sconfig)
 	if err != nil {
-		rlog.Error("Failed to create dynamic client", err)
+		vlog.Error("Failed to create dynamic client", err)
 		if err != nil {
 			panic(err)
 		}

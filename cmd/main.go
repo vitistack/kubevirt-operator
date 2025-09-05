@@ -24,6 +24,7 @@ import (
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
+	"github.com/vitistack/common/pkg/loggers/vlog"
 	"github.com/vitistack/kubevirt-operator/internal/services/initializationservice"
 	"github.com/vitistack/kubevirt-operator/internal/settings"
 	"github.com/vitistack/kubevirt-operator/pkg/clients"
@@ -137,7 +138,13 @@ func parseFlags() *Configuration {
 	flag.Parse()
 
 	// Set up the logger
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	//ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	_ = vlog.Setup(vlog.Options{Level: "info", ColorizeLine: true, AddCaller: true})
+	defer func() {
+		_ = vlog.Sync()
+	}()
+
+	ctrl.SetLogger(vlog.Logr())
 
 	return config
 }

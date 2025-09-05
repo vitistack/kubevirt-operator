@@ -10,7 +10,10 @@
       "request": "launch",
       "mode": "auto",
       "program": "${workspaceFolder}/cmd/main.go",
-      "debugAdapter": "dlv-dap"
+      "debugAdapter": "dlv-dap",
+      "env": {
+        "JSON_LOGGING": "true"
+      }
     }
   ]
 }
