@@ -34,6 +34,8 @@ hack/crds
 .github-token
 
 #talos setup
+hack/crds/
+hack/vitistack-crds/
 hack/talos/talosconfig
 hack/talos/controlplane.yaml
 hack/talos/worker.yaml

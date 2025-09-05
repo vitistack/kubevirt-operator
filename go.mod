@@ -5,7 +5,6 @@ go 1.25.1
 godebug default=go1.25
 
 require (
-	github.com/NorskHelsenett/ror v1.4.15
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.7.7
 	github.com/onsi/ginkgo/v2 v2.25.3
 	github.com/onsi/gomega v1.38.2
@@ -19,6 +18,7 @@ require (
 )
 
 require (
+	github.com/NorskHelsenett/ror v1.4.15 // indirect
 	github.com/grafana/regexp v0.0.0-20240518133315-a468a5bfb3bc // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )

@@ -12,7 +12,8 @@
       "program": "${workspaceFolder}/cmd/main.go",
       "debugAdapter": "dlv-dap",
       "env": {
-        "JSON_LOGGING": "true"
+        "JSON_LOGGING": "true",
+        "LOG_LEVEL": "debug"
       }
     }
   ]
