@@ -138,7 +138,6 @@ func parseFlags() *Configuration {
 	flag.Parse()
 
 	// Set up the logger
-	//ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	_ = vlog.Setup(vlog.Options{Level: "info", ColorizeLine: true, AddCaller: true})
 	defer func() {
 		_ = vlog.Sync()
