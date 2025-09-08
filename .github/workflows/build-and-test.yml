@@ -28,7 +28,7 @@ jobs:
           git config --global url.https://$GH_TOKEN@github.com/.insteadOf https://github.com/
 
       - name: Setup Go
-        uses: actions/setup-go@v5.5.0
+        uses: actions/setup-go@v6.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -71,7 +71,7 @@ jobs:
           git config --global url.https://$GH_TOKEN@github.com/.insteadOf https://github.com/
 
       - name: Setup Go
-        uses: actions/setup-go@v5.5.0
+        uses: actions/setup-go@v6.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -133,7 +133,7 @@ jobs:
           git config --global url.https://$GH_TOKEN@github.com/.insteadOf https://github.com/
 
       - name: Setup Go
-        uses: actions/setup-go@v5.5.0
+        uses: actions/setup-go@v6.0.0
         with:
           go-version-file: go.mod
           cache: true
