@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/vitistack/common/pkg/loggers/vlog"
+	"github.com/vitistack/common/pkg/operator/crdcheck"
 	"github.com/vitistack/kubevirt-operator/pkg/clients"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,91 +16,21 @@ import (
 
 func CheckPrerequisites() {
 	vlog.Info("Running prerequisite checks...")
-	CheckCRDs()
+
+	crdcheck.MustEnsureInstalled(context.TODO(),
+		// your CRD plural
+		crdcheck.Ref{Group: "vitistack.io", Version: "v1alpha1", Resource: "machines"},
+		crdcheck.Ref{Group: "kubevirt.io", Version: "v1", Resource: "kubevirts"},
+		crdcheck.Ref{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachineinstancemigrations"},
+		crdcheck.Ref{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachineinstancepresets"},
+		crdcheck.Ref{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachineinstancereplicasets"},
+		crdcheck.Ref{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachineinstances"},
+		crdcheck.Ref{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachines"},
+		crdcheck.Ref{Group: "pool.kubevirt.io", Version: "v1alpha1", Resource: "virtualmachinepools"},
+	)
+
 	CheckRunningKubeVirtVM()
 	vlog.Info("✅ Prerequisite checks passed")
-}
-
-func CheckCRDs() {
-	var errors []string
-	kubernetesclient := clients.Kubernetes
-
-	// Check if the cluster is accessible by listing namespaces
-	namespaces, err := kubernetesclient.CoreV1().Namespaces().List(context.TODO(), metav1.ListOptions{})
-	if err != nil {
-		errors = append(errors, fmt.Sprintf("Failed to access cluster: %s", err.Error()))
-	} else if len(namespaces.Items) == 0 {
-		errors = append(errors, "No namespaces found in the cluster")
-	}
-
-	// Only continue with CRD checks if we can access the cluster
-	if len(errors) == 0 {
-		// Check CRDs for kubevirt.io/v1
-		errors = checkGroupVersionCRDs(errors, "kubevirt.io/v1", []string{
-			"KubeVirt",
-			"VirtualMachineInstanceMigration",
-			"VirtualMachineInstancePreset",
-			"VirtualMachineInstanceReplicaSet",
-			"VirtualMachineInstance",
-			"VirtualMachine",
-		})
-
-		// Check CRDs for pool.kubevirt.io/v1alpha1
-		errors = checkGroupVersionCRDs(errors, "pool.kubevirt.io/v1alpha1", []string{
-			"VirtualMachinePool",
-		})
-
-		// Check CRDs for vitistack.io/v1alpha1 (custom Machine CRD)
-		errors = checkGroupVersionCRDs(errors, "vitistack.io/v1alpha1", []string{
-			"Machine",
-		})
-	}
-
-	// If we collected any errors, report them all together
-	if len(errors) > 0 {
-		errorMessage := fmt.Sprintf("Prerequisite checks failed:\n- %s", strings.Join(errors, "\n- "))
-		vlog.Error(errorMessage, nil)
-		panic(errorMessage)
-	}
-
-	vlog.Info("✅ All prerequisite checks passed")
-}
-
-// checkGroupVersionCRDs checks for the existence of specific CRDs in a given API group version
-func checkGroupVersionCRDs(errors []string, groupVersion string, requiredCRDs []string) []string {
-	kubernetesclient := clients.Kubernetes
-	resources, err := kubernetesclient.Discovery().ServerResourcesForGroupVersion(groupVersion)
-
-	if err != nil {
-		errors = append(errors, fmt.Sprintf("CRDs are not installed properly, could not find the resource group version installed: %s, error: %s", groupVersion, err.Error()))
-		return errors
-	}
-
-	if len(resources.APIResources) == 0 {
-		errors = append(errors, fmt.Sprintf("No resources found for group version %s", groupVersion))
-		return errors
-	}
-
-	// Check for each required CRD
-	for _, crdKind := range requiredCRDs {
-		if !crdExists(resources, crdKind) {
-			errors = append(errors, fmt.Sprintf("%s CRD is not installed (group version: %s)", crdKind, groupVersion))
-		} else {
-			vlog.Info(fmt.Sprintf("✅ %s CRD is installed (group version: %s)", crdKind, groupVersion))
-		}
-	}
-
-	return errors
-}
-
-// crdExists verifies that a specific CRD exists in the API resources
-func crdExists(resources *metav1.APIResourceList, crdKind string) bool {
-	for i := range resources.APIResources {
-		if resources.APIResources[i].Kind == crdKind {
-			return true
-		}
-	}
-	return false
 }
 
 // CheckRunningKubeVirtVM checks if KubeVirt components are properly running in the cluster

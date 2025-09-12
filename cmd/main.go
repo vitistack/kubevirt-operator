@@ -24,10 +24,10 @@ import (
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
+	"github.com/vitistack/common/pkg/clients/k8sclient"
 	"github.com/vitistack/common/pkg/loggers/vlog"
 	"github.com/vitistack/kubevirt-operator/internal/services/initializationservice"
 	"github.com/vitistack/kubevirt-operator/internal/settings"
-	"github.com/vitistack/kubevirt-operator/pkg/clients"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	netattdefv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -83,7 +83,7 @@ func main() {
 	config := parseFlags()
 
 	// Initialize clients and check prerequisites
-	clients.Init()
+	k8sclient.Init()
 	initializationservice.CheckPrerequisites()
 
 	// Set up TLS options

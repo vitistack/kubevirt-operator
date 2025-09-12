@@ -26,6 +26,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
@@ -113,6 +114,20 @@ func (r *MachineReconciler) fetchAndInitMachine(ctx context.Context, req ctrl.Re
 		}
 		logger.Error(err, "Failed to get Machine")
 		return nil, ctrl.Result{}, true, err
+	}
+
+	// Guard: Only reconcile Machines for the kubevirt provider (default if unspecified)
+	if !r.isKubevirtProvider(machine) {
+		// If we somehow have our finalizer, ensure we don't block deletion
+		if machine.GetDeletionTimestamp() != nil && controllerutil.ContainsFinalizer(machine, MachineFinalizer) {
+			controllerutil.RemoveFinalizer(machine, MachineFinalizer)
+			if err := r.Update(ctx, machine); err != nil {
+				logger.Error(err, "Failed to remove finalizer from non-kubevirt Machine")
+				return machine, ctrl.Result{}, true, err
+			}
+		}
+		logger.V(1).Info("Skipping reconcile for non-kubevirt provider", "provider", r.getProviderName(machine))
+		return machine, ctrl.Result{}, true, nil
 	}
 
 	if machine.GetDeletionTimestamp() != nil {
@@ -246,6 +261,25 @@ func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitista
 	}
 
 	return nil
+}
+
+// isKubevirtProvider returns true if the Machine's provider is kubevirt.
+// If providerConfig.name is empty or not set, we treat it as kubevirt for backward compatibility.
+func (r *MachineReconciler) isKubevirtProvider(machine *vitistackv1alpha1.Machine) bool {
+	name := r.getProviderName(machine)
+	if name == "" {
+		return true
+	}
+	return strings.EqualFold(name, "kubevirt")
+}
+
+// getProviderName extracts spec.providerConfig.name if available; otherwise returns empty string.
+func (r *MachineReconciler) getProviderName(machine *vitistackv1alpha1.Machine) string {
+	if machine == nil {
+		return ""
+	}
+	// ProviderConfig is a value type (CloudProviderConfig); zero value has empty Name
+	return strings.TrimSpace(machine.Spec.ProviderConfig.Name)
 }
 
 // NewMachineReconciler creates a new MachineReconciler with initialized managers
