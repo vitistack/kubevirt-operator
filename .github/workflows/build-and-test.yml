@@ -12,12 +12,9 @@ permissions:
 
 # Global caches that can be used across workflow runs
 jobs:
-  build:
-    name: Build
+  buildandtest:
+    name: Build, lint, test and check security
     runs-on: ubuntu-latest
-    env:
-      GOPRIVATE: github.com/vitistack
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
     steps:
       - name: Checkout code
@@ -46,8 +43,6 @@ jobs:
       - name: Install dependencies
         run: |
           go mod download
-        env:
-          GOPRIVATE: github.com/vitistack
 
       - name: Build
         run: |
@@ -56,43 +51,9 @@ jobs:
           echo "Version $VERSION"
           make build
 
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    env:
-      GOPRIVATE: github.com/vitistack
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Configure Git for private repos
+      - name: Lint
         run: |
-          git config --global url.https://$GH_TOKEN@github.com/.insteadOf https://github.com/
-
-      - name: Setup Go
-        uses: actions/setup-go@v5.5.0
-        with:
-          go-version-file: go.mod
-          cache: true
-          cache-dependency-path: go.sum
-
-      # Cache bin folder with tools and binaries
-      - name: Cache bin folder
-        uses: actions/cache@v4.2.4
-        with:
-          path: bin
-          key: ${{ runner.os }}-bin-${{ hashFiles('go.mod', 'go.sum', 'Makefile') }}
-          restore-keys: |
-            ${{ runner.os }}-bin-
-
-      - name: Install dependencies
-        run: |
-          # Clear any existing mod cache that might have auth issues
-          go clean -modcache || true
-          go mod download
-        env:
-          GOPRIVATE: github.com/vitistack
+          make lint
 
       - name: Setup test environment
         run: |
@@ -117,54 +78,6 @@ jobs:
           path: coverage.out
           retention-days: 7
 
-  security-scan:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    env:
-      GOPRIVATE: github.com/vitistack
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}
-    # Run in parallel with build job
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Configure Git for private repos
-        run: |
-          git config --global url.https://$GH_TOKEN@github.com/.insteadOf https://github.com/
-
-      - name: Setup Go
-        uses: actions/setup-go@v5.5.0
-        with:
-          go-version-file: go.mod
-          cache: true
-          cache-dependency-path: go.sum
-
-      # Cache bin folder with tools and binaries
-      - name: Cache bin folder
-        uses: actions/cache@v4.2.4
-        with:
-          path: bin
-          key: ${{ runner.os }}-bin-${{ hashFiles('go.mod', 'go.sum', 'Makefile') }}
-          restore-keys: |
-            ${{ runner.os }}-bin-
-
-      - name: Install dependencies
-        run: |
-          # Clear any existing mod cache that might have auth issues
-          go clean -modcache || true
-          go mod download
-        env:
-          GOPRIVATE: github.com/vitistack
-          GOPROXY: direct
-          GIT_TERMINAL_PROMPT: 0
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Run security scan
         run: |
-          if [ ! -f ~/go/bin/govulncheck ]; then
-            echo "Installing govulncheck..."
-            go install golang.org/x/vuln/cmd/govulncheck@latest
-          fi
-          govulncheck ./...
-        env:
-          GOPRIVATE: github.com/vitistack
+          make go-security-scan

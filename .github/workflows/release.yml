@@ -13,16 +13,10 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    env:
-      GOPRIVATE: github.com/vitistack
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-
-      - name: Configure Git for private repos
-        run: |
-          git config --global url.https://$GH_TOKEN@github.com/.insteadOf https://github.com/
 
       - name: Setup Go
         uses: actions/setup-go@v5.5.0
@@ -33,8 +27,6 @@ jobs:
       - name: Install dependencies
         run: |
           go mod download
-        env:
-          GOPRIVATE: github.com/vitistack
 
       - name: Build
         run: |
