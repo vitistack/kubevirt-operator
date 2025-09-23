@@ -21,7 +21,7 @@ limitations under the License.
 // - status: Handles Machine status updates and error reporting
 // - events: Handles VM/VMI event collection and error detection
 
-package controllers
+package v1alpha1
 
 import (
 	"context"

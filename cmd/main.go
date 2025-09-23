@@ -22,20 +22,21 @@ import (
 	"os"
 	"path/filepath"
 
+	netattdefv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	"github.com/vitistack/common/pkg/clients/k8sclient"
 	"github.com/vitistack/common/pkg/loggers/vlog"
+	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
+
+	// +kubebuilder:scaffold:imports
+	"github.com/vitistack/kubevirt-operator/controllers/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/internal/services/initializationservice"
 	"github.com/vitistack/kubevirt-operator/internal/settings"
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
-
-	netattdefv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
-	"github.com/vitistack/kubevirt-operator/controllers"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
@@ -44,7 +45,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
-	// +kubebuilder:scaffold:imports
 )
 
 // Configuration holds all the runtime configuration parameters
@@ -290,7 +290,7 @@ func setupManager(config *Configuration, metricsOpts *metricsserver.Options, web
 // addWatchersToManager adds the certificate watchers to the manager
 func addWatchersToManager(mgr ctrl.Manager, metricsCertWatcher, webhookCertWatcher *certwatcher.CertWatcher) {
 	// Setup controllers
-	machineReconciler := controllers.NewMachineReconciler(mgr.GetClient(), mgr.GetScheme())
+	machineReconciler := v1alpha1.NewMachineReconciler(mgr.GetClient(), mgr.GetScheme())
 	if err := machineReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Machine")
 		os.Exit(1)
