@@ -28,14 +28,14 @@ import (
 	"github.com/vitistack/common/pkg/clients/k8sclient"
 	"github.com/vitistack/common/pkg/loggers/vlog"
 	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
-
-	// +kubebuilder:scaffold:imports
 	"github.com/vitistack/kubevirt-operator/controllers/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/internal/services/initializationservice"
 	"github.com/vitistack/kubevirt-operator/internal/settings"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+
+	// +kubebuilder:scaffold:imports
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"

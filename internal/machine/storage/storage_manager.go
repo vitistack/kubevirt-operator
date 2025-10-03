@@ -123,6 +123,19 @@ func (m *StorageManager) CreatePVCsFromDiskSpecs(ctx context.Context, machine *v
 func (m *StorageManager) createSinglePVC(ctx context.Context, machine *vitistackv1alpha1.Machine, pvcName, storageSize, storageClass string, isBoot bool) error {
 	logger := log.FromContext(ctx)
 
+	// Check if PVC already exists
+	existingPVC := &corev1.PersistentVolumeClaim{}
+	err := m.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: machine.Namespace}, existingPVC)
+	if err == nil {
+		// PVC already exists, skip creation
+		logger.V(1).Info("PVC already exists, skipping creation", "pvc", pvcName)
+		return nil
+	}
+	if !errors.IsNotFound(err) {
+		// Some other error occurred
+		return err
+	}
+
 	labels := map[string]string{
 		"managed-by":     "kubevirt-operator",
 		"source-machine": machine.Name,

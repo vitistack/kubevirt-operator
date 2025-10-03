@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/viper"
+	"github.com/vitistack/crds/pkg/unstructuredutil"
 	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/internal/consts"
 	"github.com/vitistack/kubevirt-operator/internal/machine/network"
@@ -28,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -70,6 +72,11 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 	networkBootOrder := uint(2)
 	macAddress, err := m.MacGenerator.GetMACAddress()
 	if err != nil {
+		return nil, err
+	}
+
+	if err := m.persistMacAddressesToNetworkConfiguration(ctx, machine, macAddress, networkConfiguration.Name); err != nil {
+		logger.Error(err, "Failed to persist MAC address to NetworkConfiguration")
 		return nil, err
 	}
 
@@ -274,4 +281,106 @@ func (m *VMManager) buildDisksAndVolumes(machine *vitistackv1alpha1.Machine, pvc
 	}
 
 	return disks, volumes
+}
+
+// persistMacAddressesToNetworkConfiguration creates or updates a NetworkConfiguration CRD with the MAC address
+func (m *VMManager) persistMacAddressesToNetworkConfiguration(ctx context.Context, machine *vitistackv1alpha1.Machine, macAddress, networkName string) error {
+	logger := log.FromContext(ctx)
+
+	// Create network interface entry
+	networkInterface := vitistackv1alpha1.NetworkConfigurationInterface{
+		Name:       networkName,
+		MacAddress: macAddress,
+	}
+
+	// Try to get existing NetworkConfiguration as unstructured
+	unstructuredNetConfig := &unstructured.Unstructured{}
+	unstructuredNetConfig.SetGroupVersionKind(vitistackv1alpha1.GroupVersion.WithKind("NetworkConfiguration"))
+
+	err := m.Get(ctx, client.ObjectKey{Name: machine.Name, Namespace: machine.Namespace}, unstructuredNetConfig)
+
+	if err != nil {
+		if client.IgnoreNotFound(err) != nil {
+			return fmt.Errorf("failed to get NetworkConfiguration: %w", err)
+		}
+
+		// Create new NetworkConfiguration as typed object
+		netConfig := &vitistackv1alpha1.NetworkConfiguration{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      machine.Name,
+				Namespace: machine.Namespace,
+				Labels: map[string]string{
+					"managed-by":     "kubevirt-operator",
+					"source-machine": machine.Name,
+				},
+			},
+			Spec: vitistackv1alpha1.NetworkConfigurationSpec{
+				Name:        machine.Name,
+				Description: "Network configuration for machine " + machine.Name,
+				NetworkInterfaces: []vitistackv1alpha1.NetworkConfigurationInterface{
+					networkInterface,
+				},
+			},
+		}
+
+		// Convert to unstructured for creation
+		unstructuredNew, err := unstructuredutil.NetworkConfigurationToUnstructured(netConfig)
+		if err != nil {
+			return fmt.Errorf("failed to convert NetworkConfiguration to unstructured: %w", err)
+		}
+
+		// Ensure GVK is set explicitly
+		unstructuredNew.SetGroupVersionKind(vitistackv1alpha1.GroupVersion.WithKind("NetworkConfiguration"))
+
+		// Set Machine as the owner of the NetworkConfiguration (on unstructured object)
+		if err := controllerutil.SetControllerReference(machine, unstructuredNew, m.Scheme); err != nil {
+			return fmt.Errorf("failed to set controller reference: %w", err)
+		}
+
+		if err := m.Create(ctx, unstructuredNew); err != nil {
+			return fmt.Errorf("failed to create NetworkConfiguration: %w", err)
+		}
+
+		logger.Info("Created NetworkConfiguration", "name", netConfig.Name, "macAddress", macAddress)
+		return nil
+	}
+
+	// Convert unstructured to typed NetworkConfiguration
+	existingNetConfig, err := unstructuredutil.NetworkConfigurationFromUnstructured(unstructuredNetConfig)
+	if err != nil {
+		return fmt.Errorf("failed to convert unstructured to NetworkConfiguration: %w", err)
+	}
+
+	// Update existing NetworkConfiguration
+	// Check if interface with this MAC already exists
+	interfaceExists := false
+	for i := range existingNetConfig.Spec.NetworkInterfaces {
+		iface := &existingNetConfig.Spec.NetworkInterfaces[i]
+		if iface.Name == networkName {
+			iface.MacAddress = macAddress
+			interfaceExists = true
+			break
+		}
+	}
+
+	// If interface doesn't exist, append it
+	if !interfaceExists {
+		existingNetConfig.Spec.NetworkInterfaces = append(existingNetConfig.Spec.NetworkInterfaces, networkInterface)
+	}
+
+	// Convert back to unstructured for update
+	unstructuredUpdated, err := unstructuredutil.NetworkConfigurationToUnstructured(existingNetConfig)
+	if err != nil {
+		return fmt.Errorf("failed to convert updated NetworkConfiguration to unstructured: %w", err)
+	}
+
+	// Ensure GVK is set explicitly
+	unstructuredUpdated.SetGroupVersionKind(vitistackv1alpha1.GroupVersion.WithKind("NetworkConfiguration"))
+
+	if err := m.Update(ctx, unstructuredUpdated); err != nil {
+		return fmt.Errorf("failed to update NetworkConfiguration: %w", err)
+	}
+
+	logger.Info("Updated NetworkConfiguration", "name", existingNetConfig.Name, "macAddress", macAddress)
+	return nil
 }

@@ -70,6 +70,8 @@ const (
 // +kubebuilder:rbac:groups=vitistack.io,resources=machines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=vitistack.io,resources=machines/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=vitistack.io,resources=machines/finalizers,verbs=update
+// +kubebuilder:rbac:groups=vitistack.io,resources=networkconfigurations,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=vitistack.io,resources=networkconfigurations/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=kubevirt.io,resources=virtualmachines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kubevirt.io,resources=virtualmachines/status,verbs=get
 // +kubebuilder:rbac:groups=kubevirt.io,resources=virtualmachineinstances,verbs=get;list;watch
@@ -140,6 +142,11 @@ func (r *MachineReconciler) fetchAndInitMachine(ctx context.Context, req ctrl.Re
 	if !controllerutil.ContainsFinalizer(machine, MachineFinalizer) {
 		controllerutil.AddFinalizer(machine, MachineFinalizer)
 		if err := r.Update(ctx, machine); err != nil {
+			if errors.IsConflict(err) {
+				// Conflict error means the resource was modified, requeue to retry
+				logger.V(1).Info("Conflict updating Machine finalizer, requeuing")
+				return machine, ctrl.Result{Requeue: true}, true, nil
+			}
 			logger.Error(err, "Failed to add finalizer to Machine")
 			return machine, ctrl.Result{}, true, err
 		}
@@ -255,6 +262,11 @@ func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitista
 		// Remove finalizer
 		controllerutil.RemoveFinalizer(machine, MachineFinalizer)
 		if err := r.Update(ctx, machine); err != nil {
+			if errors.IsConflict(err) {
+				// Conflict during deletion cleanup - requeue to retry
+				logger.V(1).Info("Conflict removing finalizer during deletion, will retry")
+				return err
+			}
 			logger.Error(err, "Failed to remove finalizer from Machine")
 			return err
 		}

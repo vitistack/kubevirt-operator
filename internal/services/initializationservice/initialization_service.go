@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/vitistack/common/pkg/clients/k8sclient"
 	"github.com/vitistack/common/pkg/loggers/vlog"
 	"github.com/vitistack/common/pkg/operator/crdcheck"
-	"github.com/vitistack/kubevirt-operator/pkg/clients"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -36,7 +36,7 @@ func CheckPrerequisites() {
 // CheckRunningKubeVirtVM checks if KubeVirt components are properly running in the cluster
 func CheckRunningKubeVirtVM() {
 	var errors []string
-	kubernetesclient := clients.Kubernetes
+	kubernetesclient := k8sclient.Kubernetes
 
 	// Define the expected components and their namespaces
 	componentsToCheck := map[string][]string{
@@ -113,7 +113,7 @@ func CheckRunningKubeVirtVM() {
 
 // checkKubeVirtCR checks if the KubeVirt CR is in Ready state using dynamic client
 func checkKubeVirtCR(namespace string) (bool, error) {
-	dynamicClient := clients.DynamicClient
+	dynamicClient := k8sclient.DynamicClient
 
 	// Define the GVR for KubeVirt CR
 	gvr := schema.GroupVersionResource{
