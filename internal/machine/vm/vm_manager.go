@@ -438,7 +438,8 @@ func (m *VMManager) CleanupNetworkConfiguration(ctx context.Context, machine *vi
 		}
 
 		// Check if NetworkConfiguration MAC addresses match
-		for _, netIface := range netConfig.Spec.NetworkInterfaces {
+		for i := range netConfig.Spec.NetworkInterfaces {
+			netIface := &netConfig.Spec.NetworkInterfaces[i]
 			if netIface.MacAddress != "" {
 				if !statusMacs[netIface.MacAddress] {
 					logger.Info("NetworkConfiguration has MAC address not found in machine status",
