@@ -232,6 +232,12 @@ func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitista
 	logger := log.FromContext(ctx)
 
 	if controllerutil.ContainsFinalizer(machine, MachineFinalizer) {
+		err := r.VMManager.CleanupNetworkConfiguration(ctx, machine)
+		if err != nil {
+			logger.Error(err, "Failed to cleanup network configuration")
+			return err
+		}
+
 		// Delete associated VirtualMachine
 		vmName := fmt.Sprintf("vm-%s", machine.Name)
 		virtualMachine := &kubevirtv1.VirtualMachine{}
@@ -240,7 +246,7 @@ func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitista
 			Namespace: machine.Namespace,
 		}
 
-		err := r.Get(ctx, vmNamespacedName, virtualMachine)
+		err = r.Get(ctx, vmNamespacedName, virtualMachine)
 		if err == nil {
 			// VirtualMachine exists, delete it
 			if err := r.Delete(ctx, virtualMachine); err != nil {
@@ -259,9 +265,22 @@ func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitista
 			return err
 		}
 
+		// Fetch the latest version of the machine before removing finalizer
+		// This ensures we have the correct UID and ResourceVersion
+		latestMachine := &vitistackv1alpha1.Machine{}
+		if err := r.Get(ctx, types.NamespacedName{Name: machine.Name, Namespace: machine.Namespace}, latestMachine); err != nil {
+			if errors.IsNotFound(err) {
+				// Machine already deleted, cleanup is complete
+				logger.V(1).Info("Machine already deleted, cleanup complete")
+				return nil
+			}
+			logger.Error(err, "Failed to get latest Machine before finalizer removal")
+			return err
+		}
+
 		// Remove finalizer
-		controllerutil.RemoveFinalizer(machine, MachineFinalizer)
-		if err := r.Update(ctx, machine); err != nil {
+		controllerutil.RemoveFinalizer(latestMachine, MachineFinalizer)
+		if err := r.Update(ctx, latestMachine); err != nil {
 			if errors.IsConflict(err) {
 				// Conflict during deletion cleanup - requeue to retry
 				logger.V(1).Info("Conflict removing finalizer during deletion, will retry")

@@ -23,6 +23,7 @@ func Init() {
 	viper.SetDefault(consts.CPU_MODEL, cpuModel)
 	viper.SetDefault(consts.JSON_LOGGING, true)
 	viper.SetDefault(consts.LOG_LEVEL, "info")
+	viper.SetDefault(consts.MANAGED_BY, "kubevirt-operator")
 
 	viper.AutomaticEnv()
 }

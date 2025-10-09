@@ -20,7 +20,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/spf13/viper"
 	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
+	"github.com/vitistack/kubevirt-operator/internal/consts"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -137,7 +139,7 @@ func (m *StorageManager) createSinglePVC(ctx context.Context, machine *vitistack
 	}
 
 	labels := map[string]string{
-		"managed-by":     "kubevirt-operator",
+		"managed-by":     viper.GetString(consts.MANAGED_BY),
 		"source-machine": machine.Name,
 	}
 
@@ -186,7 +188,7 @@ func (m *StorageManager) DeleteAssociatedPVCs(ctx context.Context, machine *viti
 	listOpts := []client.ListOption{
 		client.InNamespace(machine.Namespace),
 		client.MatchingLabels{
-			"managed-by":     "kubevirt-operator",
+			"managed-by":     viper.GetString(consts.MANAGED_BY),
 			"source-machine": machine.Name,
 		},
 	}

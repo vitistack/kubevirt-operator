@@ -85,7 +85,7 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 			Name:      vmName,
 			Namespace: machine.Namespace,
 			Labels: map[string]string{
-				"managed-by":     "kubevirt-operator",
+				"managed-by":     viper.GetString(consts.MANAGED_BY),
 				"source-machine": machine.Name,
 			},
 		},
@@ -94,7 +94,7 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 			Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"managed-by":     "kubevirt-operator",
+						"managed-by":     viper.GetString(consts.MANAGED_BY),
 						"source-machine": machine.Name,
 					},
 				},
@@ -310,7 +310,7 @@ func (m *VMManager) persistMacAddressesToNetworkConfiguration(ctx context.Contex
 				Name:      machine.Name,
 				Namespace: machine.Namespace,
 				Labels: map[string]string{
-					"managed-by":     "kubevirt-operator",
+					"managed-by":     viper.GetString(consts.MANAGED_BY),
 					"source-machine": machine.Name,
 				},
 			},
@@ -382,5 +382,83 @@ func (m *VMManager) persistMacAddressesToNetworkConfiguration(ctx context.Contex
 	}
 
 	logger.Info("Updated NetworkConfiguration", "name", existingNetConfig.Name, "macAddress", macAddress)
+	return nil
+}
+
+// CleanupNetworkConfiguration deletes the NetworkConfiguration associated with the machine
+func (m *VMManager) CleanupNetworkConfiguration(ctx context.Context, machine *vitistackv1alpha1.Machine) error {
+	logger := log.FromContext(ctx)
+
+	// Try to get existing NetworkConfiguration as unstructured
+	unstructuredNetConfig := &unstructured.Unstructured{}
+	unstructuredNetConfig.SetGroupVersionKind(vitistackv1alpha1.GroupVersion.WithKind("NetworkConfiguration"))
+
+	err := m.Get(ctx, client.ObjectKey{Name: machine.Name, Namespace: machine.Namespace}, unstructuredNetConfig)
+	if err != nil {
+		if client.IgnoreNotFound(err) != nil {
+			return fmt.Errorf("failed to get NetworkConfiguration: %w", err)
+		}
+		// NetworkConfiguration doesn't exist, nothing to clean up
+		logger.Info("NetworkConfiguration not found, nothing to clean up", "machine", machine.Name)
+		return nil
+	}
+
+	// Convert unstructured to typed NetworkConfiguration for validation
+	netConfig, err := unstructuredutil.NetworkConfigurationFromUnstructured(unstructuredNetConfig)
+	if err != nil {
+		return fmt.Errorf("failed to convert unstructured to NetworkConfiguration: %w", err)
+	}
+
+	// Validate labels match expected values
+	labels := unstructuredNetConfig.GetLabels()
+	expectedManagedBy := viper.GetString(consts.MANAGED_BY)
+	if managedBy, ok := labels["managed-by"]; !ok || managedBy != expectedManagedBy {
+		logger.Info("NetworkConfiguration has unexpected managed-by label, skipping deletion",
+			"name", machine.Name,
+			"managed-by", managedBy)
+		return fmt.Errorf("NetworkConfiguration managed-by label mismatch: expected '%s', got '%s'", expectedManagedBy, managedBy)
+	}
+
+	if sourceMachine, ok := labels["source-machine"]; !ok || sourceMachine != machine.Name {
+		logger.Info("NetworkConfiguration has unexpected source-machine label, skipping deletion",
+			"name", machine.Name,
+			"source-machine", sourceMachine,
+			"expected", machine.Name)
+		return fmt.Errorf("NetworkConfiguration source-machine label mismatch: expected '%s', got '%s'", machine.Name, sourceMachine)
+	}
+
+	// Validate MAC addresses match machine status if available
+	if len(machine.Status.NetworkInterfaces) > 0 {
+		// Build a map of MAC addresses from machine status
+		statusMacs := make(map[string]bool)
+		for _, iface := range machine.Status.NetworkInterfaces {
+			if iface.MACAddress != "" {
+				statusMacs[iface.MACAddress] = true
+			}
+		}
+
+		// Check if NetworkConfiguration MAC addresses match
+		for _, netIface := range netConfig.Spec.NetworkInterfaces {
+			if netIface.MacAddress != "" {
+				if !statusMacs[netIface.MacAddress] {
+					logger.Info("NetworkConfiguration has MAC address not found in machine status",
+						"name", machine.Name,
+						"macAddress", netIface.MacAddress)
+					return fmt.Errorf("NetworkConfiguration MAC address '%s' not found in machine status", netIface.MacAddress)
+				}
+			}
+		}
+
+		logger.Info("NetworkConfiguration validation passed", "name", machine.Name, "macAddresses", len(netConfig.Spec.NetworkInterfaces))
+	} else {
+		logger.Info("No network interfaces in machine status, skipping MAC address validation", "name", machine.Name)
+	}
+
+	// Delete the NetworkConfiguration
+	if err := m.Delete(ctx, unstructuredNetConfig); err != nil {
+		return fmt.Errorf("failed to delete NetworkConfiguration: %w", err)
+	}
+
+	logger.Info("Successfully deleted NetworkConfiguration", "name", machine.Name)
 	return nil
 }
