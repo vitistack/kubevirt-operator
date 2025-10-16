@@ -29,8 +29,35 @@ func CheckPrerequisites() {
 		crdcheck.Ref{Group: "pool.kubevirt.io", Version: "v1alpha1", Resource: "virtualmachinepools"},
 	)
 
+	CheckKubevirtConfigsExist()
+
 	CheckRunningKubeVirtVM()
 	vlog.Info("✅ Prerequisite checks passed")
+}
+
+func CheckKubevirtConfigsExist() {
+	namespace := "default" // Adjust if your KubevirtConfigs are in a different namespace
+	configs, err := k8sclient.DynamicClient.Resource(schema.GroupVersionResource{
+		Group:    "vitistack.io",
+		Version:  "v1alpha1",
+		Resource: "kubevirtconfigs",
+	}).Namespace(namespace).List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		vlog.Error("Failed to list KubevirtConfigs", err)
+		panic(fmt.Sprintf("Failed to list KubevirtConfigs: %s", err.Error()))
+	}
+
+	if len(configs.Items) == 0 {
+		errorMessage := fmt.Sprintf("No KubevirtConfig resources found in namespace '%s'. Please create at least one KubevirtConfig.", namespace)
+		vlog.Error(errorMessage, nil)
+		panic(errorMessage)
+	}
+
+	configNames := make([]string, 0, len(configs.Items))
+	for _, config := range configs.Items {
+		configNames = append(configNames, config.GetName())
+	}
+	vlog.Info(fmt.Sprintf("✅ Found %d KubevirtConfig(s): %s", len(configs.Items), strings.Join(configNames, ", ")))
 }
 
 // CheckRunningKubeVirtVM checks if KubeVirt components are properly running in the cluster

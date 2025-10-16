@@ -9,6 +9,7 @@ rules:
   resources:
   - events
   - pods
+  - secrets
   verbs:
   - get
   - list
@@ -64,6 +65,14 @@ rules:
   - storage.k8s.io
   resources:
   - storageclasses
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - vitistack.io
+  resources:
+  - kubevirtconfigs
   verbs:
   - get
   - list

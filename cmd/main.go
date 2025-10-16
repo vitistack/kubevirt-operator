@@ -25,12 +25,15 @@ import (
 	netattdefv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
+	"github.com/spf13/viper"
 	"github.com/vitistack/common/pkg/clients/k8sclient"
 	"github.com/vitistack/common/pkg/loggers/vlog"
 	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/controllers/v1alpha1"
+	"github.com/vitistack/kubevirt-operator/internal/consts"
 	"github.com/vitistack/kubevirt-operator/internal/services/initializationservice"
 	"github.com/vitistack/kubevirt-operator/internal/settings"
+	"github.com/vitistack/kubevirt-operator/pkg/clients"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -79,6 +82,7 @@ func init() {
 
 func main() {
 	settings.Init()
+	vlog.Info("Starting kubevirt operator")
 	// Parse command line flags
 	config := parseFlags()
 
@@ -138,7 +142,14 @@ func parseFlags() *Configuration {
 	flag.Parse()
 
 	// Set up the logger
-	_ = vlog.Setup(vlog.Options{Level: "info", ColorizeLine: true, AddCaller: true})
+	_ = vlog.Setup(vlog.Options{
+		Level:             viper.GetString(consts.LOG_LEVEL),
+		ColorizeLine:      viper.GetBool(consts.LOG_COLORIZE_LINE),
+		AddCaller:         viper.GetBool(consts.LOG_ADD_CALLER),
+		DisableStacktrace: viper.GetBool(consts.LOG_DISABLE_STACKTRACE),
+		UnescapeMultiline: viper.GetBool(consts.LOG_UNESCAPED_MULTILINE),
+		JSON:              viper.GetBool(consts.LOG_JSON),
+	})
 	defer func() {
 		_ = vlog.Sync()
 	}()
@@ -289,8 +300,21 @@ func setupManager(config *Configuration, metricsOpts *metricsserver.Options, web
 
 // addWatchersToManager adds the certificate watchers to the manager
 func addWatchersToManager(mgr ctrl.Manager, metricsCertWatcher, webhookCertWatcher *certwatcher.CertWatcher) {
+	// Initialize KubevirtClientManager
+	kubevirtConfigNamespace := viper.GetString(consts.KUBEVIRT_CONFIGS_NAMESPACE)
+	if kubevirtConfigNamespace == "" {
+		kubevirtConfigNamespace = "default" // fallback to default namespace
+		setupLog.Info("KUBEVIRT_CONFIGS_NAMESPACE not set, using default namespace")
+	}
+
+	kubevirtClientMgr := clients.NewKubevirtClientManager(
+		mgr.GetClient(),
+		mgr.GetScheme(),
+		kubevirtConfigNamespace,
+	)
+
 	// Setup controllers
-	machineReconciler := v1alpha1.NewMachineReconciler(mgr.GetClient(), mgr.GetScheme())
+	machineReconciler := v1alpha1.NewMachineReconciler(mgr.GetClient(), mgr.GetScheme(), kubevirtClientMgr)
 	if err := machineReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Machine")
 		os.Exit(1)

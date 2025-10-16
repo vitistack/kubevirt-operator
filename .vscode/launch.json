@@ -12,8 +12,7 @@
       "program": "${workspaceFolder}/cmd/main.go",
       "debugAdapter": "dlv-dap",
       "env": {
-        "JSON_LOGGING": "true",
-        "LOG_LEVEL": "debug"
+        "env": "" // Env var for dotenv file, e.g. ".env.development"
       }
     }
   ]
