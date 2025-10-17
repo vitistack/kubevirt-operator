@@ -126,12 +126,14 @@ The reconciler depends on the `ClientManager` interface rather than the concrete
 ```go
 // +kubebuilder:rbac:groups=vitistack.io,resources=kubevirtconfigs,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list
 ```
 
 These allow the operator to:
 
 - Read KubevirtConfig CRDs
 - Read kubeconfig Secrets referenced by KubevirtConfigs
+- Read CRD definitions for version compatibility checks
 
 ## KubevirtConfig CRD
 
@@ -293,6 +295,54 @@ env:
     value: "default-cluster" # Optional
 ```
 
+### Initialization Checks
+
+The operator performs several checks on startup:
+
+1. **Supervisor Cluster CRDs**: Validates that Machine and KubevirtConfig CRDs are installed
+2. **KubevirtConfig Availability**: Ensures at least one KubevirtConfig exists
+3. **Remote Cluster Connectivity**: Tests connection to each remote cluster
+4. **KubeVirt Components**: Verifies KubeVirt is installed and running on remote clusters
+5. **CRD Version Compatibility**: Checks that CRD versions match between supervisor and remote clusters (logs warnings for mismatches)
+
+**CRD Version Compatibility Check:**
+
+The operator automatically validates CRD schemas and versions during initialization to help catch compatibility issues early:
+
+**Supervisor Cluster (vitistack.io CRDs):**
+
+- Fetches complete CRD schemas for machines, networkconfigurations, and kubevirtconfigs
+- Validates that expected properties exist in the CRD schemas:
+  - `machines.vitistack.io`: instanceType, kubevirtConfigRef, phase, conditions
+  - `networkconfigurations.vitistack.io`: networks, phase
+  - `kubevirtconfigs.vitistack.io`: kubeconfigSecretRef, phase
+- Logs warnings if expected fields are missing from the schema
+- **Note:** KubeVirt is NOT installed on the supervisor cluster
+
+**Remote KubeVirt Clusters (kubevirt.io CRDs):**
+
+- Compares `kubevirt.io` CRD versions (virtualmachines, virtualmachineinstances) across all remote clusters
+- Uses first remote cluster as baseline
+- Logs warnings if versions differ between remote clusters
+- **Note:** These CRDs only exist on remote clusters, not on supervisor
+
+**Why this approach?**
+
+- Supervisor cluster runs the operator and stores Machine CRs (vitistack.io CRDs)
+- Remote clusters run KubeVirt and host VirtualMachines (kubevirt.io CRDs)
+- Schema validation ensures the operator can use all expected fields
+- Version consistency across remote clusters prevents unexpected behavior when moving workloads
+- Catches CRD mismatches before they cause runtime errors
+
+**Log output:**
+
+- **Matching schemas/versions**: Logged as info (✅)
+- **Mismatched versions**: Logged as warning (⚠️) with details
+- **Missing CRD fields**: Logged as warning (⚠️) with field names
+- **Missing CRDs**: Logged as warning (⚠️) if a CRD doesn't exist
+
+These warnings are informational and don't block operator startup, but they help identify potential compatibility issues.
+
 ### Namespace Setup
 
 Create a namespace for KubevirtConfig CRDs:
@@ -416,10 +466,12 @@ Scenarios:
    - Using annotations as a workaround
    - TODO: Update Machine CRD to include proper reference field
 
-2. **No Active Watching of Remote VMs**
+2. **Polling-Based Status Updates**
 
-   - Status updates happen on reconciliation intervals
-   - TODO: Implement watchers on remote clusters (task #5)
+   - Status updates happen on reconciliation intervals (30 seconds via RequeueAfter)
+   - This is simpler and more reliable than managing informers for multiple remote clusters
+   - Adequate for most use cases
+   - Future enhancement: Implement event-driven watches for real-time updates
 
 3. **No Multi-Namespace Support**
 
@@ -432,30 +484,28 @@ Scenarios:
 
 ### Future Enhancements
 
-1. **Remote VM Status Synchronizer** (Task #5)
+1. **Event-Driven VM Status Synchronizer**
 
-   - Watch VMs/VMIs in remote clusters
-   - Push status updates to supervisor cluster
-   - More real-time status updates
+   **Current Approach:** Polling-based reconciliation with `RequeueAfter` (30s interval)
 
-2. **Initialization Service Updates** (Task #8)
+   - Simple and reliable
+   - Works well for most use cases
+   - No additional complexity
 
-   - Verify KubevirtConfig CRDs exist at startup
-   - Validate at least one remote cluster is accessible
+   **Future Enhancement:** Event-driven watches
 
-3. **Client Refresh/Rotation**
+   - Watch VMs/VMIs in remote clusters for real-time updates
+   - Requires managing informers for multiple remote clusters
+   - More complex but provides instant reconciliation on VM changes
+   - Trade-off: Complexity vs. responsiveness
+
+2. **Client Refresh/Rotation**
 
    - Handle kubeconfig secret updates
    - Automatic client invalidation on connection errors
    - Reconnection logic
 
-4. **Health Monitoring**
-
-   - Regular health checks of remote clusters
-   - Mark Machines as degraded if remote cluster unreachable
-   - Metrics for remote cluster health
-
-5. **Machine CRD Updates**
+3. **Machine CRD Updates**
    - Add `spec.kubevirtConfigRef` field
    - Add `status.kubevirtConfigRef` field
    - Migration path from annotations

@@ -55,4 +55,7 @@ type ClientManager interface {
 	// GetRESTConfigForConfig returns a REST config for the specified KubevirtConfig
 	// This is useful for creating informers or other clients that need direct REST access
 	GetRESTConfigForConfig(ctx context.Context, kubevirtConfigName string) (*rest.Config, error)
+
+	// GetSupervisorClient returns the Kubernetes client for the supervisor cluster
+	GetSupervisorClient() client.Client
 }

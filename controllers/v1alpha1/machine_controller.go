@@ -37,7 +37,6 @@ import (
 	"github.com/vitistack/kubevirt-operator/internal/machine/vm"
 	"github.com/vitistack/kubevirt-operator/pkg/clients"
 	"github.com/vitistack/kubevirt-operator/pkg/macaddress"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -46,7 +45,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -85,6 +83,7 @@ const (
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=k8s.cni.cncf.io,resources=network-attachment-definitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=storage.k8s.io,resources=storageclasses,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list
 
 func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -400,11 +399,11 @@ func NewMachineReconciler(c client.Client, scheme *runtime.Scheme, kubevirtClien
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// In a multi-cluster architecture, we only watch Machine resources on the supervisor cluster.
+	// VirtualMachine and VirtualMachineInstance resources exist on remote KubeVirt clusters,
+	// not on the supervisor cluster, so we don't set up watches for them here.
+	// Instead, we interact with them directly through the remote clients in the reconciliation loop.
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vitistackv1alpha1.Machine{}).
-		Owns(&kubevirtv1.VirtualMachine{}).
-		Owns(&corev1.PersistentVolumeClaim{}).
-		Watches(&kubevirtv1.VirtualMachineInstance{},
-			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &vitistackv1alpha1.Machine{})).
 		Complete(r)
 }

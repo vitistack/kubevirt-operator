@@ -36,6 +36,9 @@ type MockClientManager struct {
 	// ConfigNamespace is the namespace where configs are stored
 	ConfigNamespace string
 
+	// SupervisorClient is the client for the supervisor cluster
+	SupervisorClient client.Client
+
 	// GetClientForConfigFunc allows custom behavior for GetClientForConfig
 	GetClientForConfigFunc func(ctx context.Context, kubevirtConfigName string) (client.Client, error)
 
@@ -108,6 +111,11 @@ func (m *MockClientManager) InvalidateAll() {
 // GetConfigNamespace returns the mocked namespace
 func (m *MockClientManager) GetConfigNamespace() string {
 	return m.ConfigNamespace
+}
+
+// GetSupervisorClient returns the mocked supervisor client
+func (m *MockClientManager) GetSupervisorClient() client.Client {
+	return m.SupervisorClient
 }
 
 // ValidateConnection tracks validation calls

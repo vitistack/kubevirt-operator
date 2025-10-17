@@ -40,9 +40,11 @@ import (
 
 	// +kubebuilder:scaffold:imports
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"k8s.io/klog/v2"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -154,7 +156,13 @@ func parseFlags() *Configuration {
 		_ = vlog.Sync()
 	}()
 
-	ctrl.SetLogger(vlog.Logr())
+	// set the controller-runtime logger
+	//ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts))) // default for kubebuilder
+	ctrl.SetLogger(vlog.Logr()) // vlog logger
+
+	// Configure klog to use the same logger as controller-runtime
+	// This prevents verbose HTTP debug logging from client-go
+	klog.SetLogger(vlog.Logr())
 
 	return config
 }
@@ -307,6 +315,27 @@ func addWatchersToManager(mgr ctrl.Manager, metricsCertWatcher, webhookCertWatch
 		setupLog.Info("KUBEVIRT_CONFIGS_NAMESPACE not set, using default namespace")
 	}
 
+	// Create a direct API client (non-cached) for initialization checks
+	// The manager's cache hasn't started yet, so we need a direct client
+	directClient, err := client.New(mgr.GetConfig(), client.Options{
+		Scheme: mgr.GetScheme(),
+	})
+	if err != nil {
+		setupLog.Error(err, "failed to create direct API client for initialization")
+		os.Exit(1)
+	}
+
+	// Create ClientManager with direct client for initialization
+	initClientMgr := clients.NewKubevirtClientManager(
+		directClient,
+		mgr.GetScheme(),
+		kubevirtConfigNamespace,
+	)
+
+	// Check KubeVirt clusters availability using direct client
+	initializationservice.CheckKubevirtClustersAvailable(initClientMgr)
+
+	// Create ClientManager with cached client for normal operations
 	kubevirtClientMgr := clients.NewKubevirtClientManager(
 		mgr.GetClient(),
 		mgr.GetScheme(),
@@ -319,6 +348,12 @@ func addWatchersToManager(mgr ctrl.Manager, metricsCertWatcher, webhookCertWatch
 		setupLog.Error(err, "unable to create controller", "controller", "Machine")
 		os.Exit(1)
 	}
+
+	// TODO: Implement VM synchronizer for event-driven reconciliation
+	// Currently, the Machine controller uses polling (RequeueAfter: 30s) to check VM status
+	// Future enhancement: Watch VMs in remote clusters and trigger reconciliation on changes
+	// This would require managing informers for multiple remote clusters
+	// See: docs/multi-cluster-architecture.md "Future Enhancements" section
 
 	// +kubebuilder:scaffold:builder
 
