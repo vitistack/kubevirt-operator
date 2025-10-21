@@ -157,7 +157,6 @@ func parseFlags() *Configuration {
 	}()
 
 	// set the controller-runtime logger
-	//ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts))) // default for kubebuilder
 	ctrl.SetLogger(vlog.Logr()) // vlog logger
 
 	// Configure klog to use the same logger as controller-runtime
