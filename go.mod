@@ -6,11 +6,11 @@ godebug default=go1.25
 
 require (
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.7.7
-	github.com/onsi/ginkgo/v2 v2.26.0
+	github.com/onsi/ginkgo/v2 v2.27.1
 	github.com/onsi/gomega v1.38.2
 	github.com/spf13/viper v1.21.0
-	github.com/vitistack/common v0.0.15
-	github.com/vitistack/crds v0.2.9
+	github.com/vitistack/common v0.0.18
+	github.com/vitistack/crds v0.3.1
 	k8s.io/api v0.34.1
 	k8s.io/apimachinery v0.34.1
 	k8s.io/client-go v0.34.1
@@ -22,7 +22,7 @@ require (
 require (
 	cel.dev/expr v0.24.0 // indirect
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
-	github.com/NorskHelsenett/ror v1.5.11 // indirect
+	github.com/NorskHelsenett/ror v1.7.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
@@ -89,7 +89,7 @@ require (
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.67.1 // indirect
-	github.com/prometheus/procfs v0.17.0 // indirect
+	github.com/prometheus/procfs v0.18.0 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
 	github.com/quic-go/quic-go v0.55.0 // indirect
 	github.com/sagikazarmark/locafero v0.12.0 // indirect
@@ -130,8 +130,8 @@ require (
 	golang.org/x/time v0.14.0 // indirect
 	golang.org/x/tools v0.38.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20251020155222-88f65dc88635 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20251020155222-88f65dc88635 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20251022142026-3a174f9686a8 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20251022142026-3a174f9686a8 // indirect
 	google.golang.org/grpc v1.76.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
