@@ -5,8 +5,8 @@ github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03
 github.com/Masterminds/semver/v3 v3.4.0 h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1Xbatp0=
 github.com/Masterminds/semver/v3 v3.4.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
 github.com/NYTimes/gziphandler v0.0.0-20170623195520-56545f4a5d46/go.mod h1:3wb06e3pkSAbeQ52E9H9iFoQsEEwGN64994WTCIhntQ=
-github.com/NorskHelsenett/ror v1.5.3 h1:AB0sn1GQ+yZNcDgvP0HC7f2IwwhqB3YKipxbTRNA88E=
-github.com/NorskHelsenett/ror v1.5.3/go.mod h1:9nCqAkTYrD5YoC6JZGra/2+TFqA1SQVk4bDD2fA/Fnc=
+github.com/NorskHelsenett/ror v1.7.0 h1:ps4OVBofRBcPSJHDBfnrgLbOe8w9rBczbsY6O5aWNUk=
+github.com/NorskHelsenett/ror v1.7.0/go.mod h1:D4ZM18hi7opjZCoDz8D8alBL+H1/jOX62MDsFWZHjRw=
 github.com/PuerkitoBio/purell v1.1.1/go.mod h1:c11w/QuzBsJSee3cPx9rAFu61PvFxuPbtSwDGJws/X0=
 github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578/go.mod h1:uGdkoq3SwY9Y+13GIhn11/XLaGBb4BfwItxLd5jeuXE=
 github.com/antlr4-go/antlr/v4 v4.13.1 h1:SqQKkuVZ+zWkMMNkjy5FZe5mr5WURWnlpmOuzYWrPrQ=
@@ -335,8 +335,8 @@ github.com/ugorji/go/codec v1.3.0 h1:Qd2W2sQawAfG8XSvzwhBeoGq71zXOC/Q1E9y/wUcsUA
 github.com/ugorji/go/codec v1.3.0/go.mod h1:pRBVtBSKl77K30Bv8R2P+cLSGaTtex6fsA2Wjqmfxj4=
 github.com/vitistack/common v0.0.15 h1:D1nbI7SSECxA45KeyJlT6LVY/DCF1Iwp2yp4xMsotlU=
 github.com/vitistack/common v0.0.15/go.mod h1:Qf6Giu/XJ3nzxPCiVSXUj5dy40Il4Ly37AEnGkO3ZjY=
-github.com/vitistack/crds v0.2.6 h1:mPA5bDXjNNYoiNwtl+0PhSvZ0F8LjhCu6nhE8x8liuo=
-github.com/vitistack/crds v0.2.6/go.mod h1:nWVDoLX0qZBlWmP+AhcOxSXXfVJP5G86RcNclFwcodA=
+github.com/vitistack/crds v0.3.1 h1:WTJV0gcuptmdgbDZ7X34ZBSRV+NNi3HTGG96NaGB/XE=
+github.com/vitistack/crds v0.3.1/go.mod h1:LWruO5p1Ta8o2EOnrr7J8+b5AnVZzf8nbxKa646K26w=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
 github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
