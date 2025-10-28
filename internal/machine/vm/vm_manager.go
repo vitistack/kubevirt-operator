@@ -145,10 +145,10 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 	machine.Status.Phase = vitistackv1alpha1.MachinePhaseCreating
 	machine.Status.State = consts.MachineStatePending
 
-	// Set Machine as the owner of the VirtualMachine
-	if err := controllerutil.SetControllerReference(machine, vm, m.Scheme); err != nil {
-		return nil, err
-	}
+	// Note: We do NOT set Machine as the owner reference for the VirtualMachine because
+	// they exist in different clusters (Machine on supervisor, VM on remote KubeVirt cluster).
+	// Cross-cluster owner references are not supported in Kubernetes.
+	// Instead, we rely on labels (source-machine, managed-by) for tracking and cleanup.
 
 	// Create VM in the remote KubeVirt cluster
 	if err := m.remoteClient.Create(ctx, vm); err != nil {

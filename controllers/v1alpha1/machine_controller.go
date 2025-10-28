@@ -132,7 +132,7 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
-	return r.StatusManager.UpdateMachineStatusFromVMAndVMI(ctx, machine, virtualmachine, vmi, vmiExists)
+	return r.StatusManager.UpdateMachineStatusFromVMAndVMI(ctx, machine, virtualmachine, vmi, vmiExists, remoteClient)
 }
 
 // recordKubevirtConfigFailure updates machine status for kubevirt config errors.
@@ -224,12 +224,12 @@ func (r *MachineReconciler) ensureVirtualMachine(ctx context.Context, machine *v
 			return nil, vmName, ctrl.Result{}, true, err
 		}
 		// Need to create VM
-		networkConfiguration, netErr := r.NetworkManager.GetNetworkConfiguration(ctx, machine)
+		networkConfiguration, netErr := r.NetworkManager.GetNetworkConfiguration(ctx, machine, remoteClient)
 		if netErr != nil {
 			r.recordNetworkFailure(ctx, machine, netErr)
 			return nil, vmName, ctrl.Result{}, true, netErr
 		}
-		pvcNames, pvcErr := r.StorageManager.CreatePVCsFromDiskSpecs(ctx, machine, vmName)
+		pvcNames, pvcErr := r.StorageManager.CreatePVCsFromDiskSpecs(ctx, machine, vmName, remoteClient)
 		if pvcErr != nil {
 			logger.Error(pvcErr, "Failed to create PVCs")
 			_ = r.StatusManager.UpdateMachineStatus(ctx, machine, "Failed")
@@ -323,9 +323,9 @@ func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitista
 			return err
 		}
 
-		// Delete all associated PVCs (assuming these are in the supervisor cluster)
+		// Delete all associated PVCs from the remote cluster
 		vmName := fmt.Sprintf("vm-%s", machine.Name)
-		if err := r.StorageManager.DeleteAssociatedPVCs(ctx, machine, vmName); err != nil {
+		if err := r.StorageManager.DeleteAssociatedPVCs(ctx, machine, vmName, remoteClient); err != nil {
 			logger.Error(err, "Failed to delete associated PVCs")
 			return err
 		}

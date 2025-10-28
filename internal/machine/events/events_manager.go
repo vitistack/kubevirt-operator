@@ -41,23 +41,24 @@ func NewManager(c client.Client) *EventsManager {
 	}
 }
 
-// GetVMIEvents fetches events related to a VirtualMachineInstance and returns error events
-func (m *EventsManager) GetVMIEvents(ctx context.Context, vmi *kubevirtv1.VirtualMachineInstance, machine *vitistackv1alpha1.Machine) ([]string, error) {
-	return m.collectErrorEvents(ctx, vmi.Namespace, vmi.Name, string(vmi.UID), "VirtualMachineInstance", vmi.CreationTimestamp, machine.CreationTimestamp, true)
+// GetVMIEvents fetches events related to a VirtualMachineInstance and returns error events from the remote cluster
+func (m *EventsManager) GetVMIEvents(ctx context.Context, vmi *kubevirtv1.VirtualMachineInstance, machine *vitistackv1alpha1.Machine, remoteClient client.Client) ([]string, error) {
+	return m.collectErrorEvents(ctx, vmi.Namespace, vmi.Name, string(vmi.UID), "VirtualMachineInstance", vmi.CreationTimestamp, machine.CreationTimestamp, true, remoteClient)
 }
 
-// GetVMEvents fetches events related to a VirtualMachine and returns error events
-func (m *EventsManager) GetVMEvents(ctx context.Context, vm *kubevirtv1.VirtualMachine, machine *vitistackv1alpha1.Machine) ([]string, error) {
-	return m.collectErrorEvents(ctx, vm.Namespace, vm.Name, string(vm.UID), "VirtualMachine", vm.CreationTimestamp, machine.CreationTimestamp, false)
+// GetVMEvents fetches events related to a VirtualMachine and returns error events from the remote cluster
+func (m *EventsManager) GetVMEvents(ctx context.Context, vm *kubevirtv1.VirtualMachine, machine *vitistackv1alpha1.Machine, remoteClient client.Client) ([]string, error) {
+	return m.collectErrorEvents(ctx, vm.Namespace, vm.Name, string(vm.UID), "VirtualMachine", vm.CreationTimestamp, machine.CreationTimestamp, false, remoteClient)
 }
 
-// collectErrorEvents consolidates event collection and filtering logic for both VMIs and VMs
-func (m *EventsManager) collectErrorEvents(ctx context.Context, namespace, name, uid, kind string, objectCreation, machineCreation metav1.Time, includeSyncFailed bool) ([]string, error) {
+// collectErrorEvents consolidates event collection and filtering logic for both VMIs and VMs from the remote cluster
+func (m *EventsManager) collectErrorEvents(ctx context.Context, namespace, name, uid, kind string, objectCreation, machineCreation metav1.Time, includeSyncFailed bool, remoteClient client.Client) ([]string, error) {
 	logger := log.FromContext(ctx)
 
+	// List events from the remote KubeVirt cluster
 	eventList := &corev1.EventList{}
-	if err := m.List(ctx, eventList, &client.ListOptions{Namespace: namespace}); err != nil {
-		logger.Error(err, "Failed to list events", "kind", kind, "name", name)
+	if err := remoteClient.List(ctx, eventList, &client.ListOptions{Namespace: namespace}); err != nil {
+		logger.Error(err, "Failed to list events from remote cluster", "kind", kind, "name", name)
 		return nil, err
 	}
 
