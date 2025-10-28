@@ -102,9 +102,9 @@ func (m *StatusManager) UpdateMachineStatusWithDetails(ctx context.Context, mach
 }
 
 // UpdateMachineStatusFromVMAndVMI determines and updates machine status based on VM and VMI state
-func (m *StatusManager) UpdateMachineStatusFromVMAndVMI(ctx context.Context, machine *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine, vmi *kubevirtv1.VirtualMachineInstance, vmiExists bool) (ctrl.Result, error) {
+func (m *StatusManager) UpdateMachineStatusFromVMAndVMI(ctx context.Context, machine *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine, vmi *kubevirtv1.VirtualMachineInstance, vmiExists bool, remoteClient client.Client) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	state, phase, requeue := m.evaluateState(machine, vm, vmi, vmiExists, ctx)
+	state, phase, requeue := m.evaluateState(machine, vm, vmi, vmiExists, ctx, remoteClient)
 
 	machine.Status.Phase = phase
 	machine.Status.State = state
@@ -121,16 +121,16 @@ func (m *StatusManager) UpdateMachineStatusFromVMAndVMI(ctx context.Context, mac
 }
 
 // evaluateState determines the machine state/phase and performs ancillary updates (pod info & error checks)
-func (m *StatusManager) evaluateState(machine *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine, vmi *kubevirtv1.VirtualMachineInstance, vmiExists bool, ctx context.Context) (state, phase string, requeue bool) {
+func (m *StatusManager) evaluateState(machine *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine, vmi *kubevirtv1.VirtualMachineInstance, vmiExists bool, ctx context.Context, remoteClient client.Client) (state, phase string, requeue bool) {
 	logger := log.FromContext(ctx)
 	if vmiExists {
 		state, phase, requeue = m.mapVMIPhase(vmi.Status.Phase)
 		if vmi.Status.Phase == kubevirtv1.Running {
-			if err := m.updateStatusFromPodVMVMIStatus(ctx, machine, vmi); err != nil {
+			if err := m.updateStatusFromPodVMVMIStatus(ctx, machine, vmi, remoteClient); err != nil {
 				logger.Error(err, "Failed to update vm and vmi status information", "vmi", vmi.Name)
 			}
 		}
-		if err := m.checkVMIErrorsAndUpdateStatus(ctx, machine, vmi); err != nil {
+		if err := m.checkVMIErrorsAndUpdateStatus(ctx, machine, vmi, remoteClient); err != nil {
 			logger.Error(err, "Failed to check VMI errors")
 		}
 		for i := range vmi.Status.Conditions {
@@ -141,7 +141,7 @@ func (m *StatusManager) evaluateState(machine *vitistackv1alpha1.Machine, vm *ku
 	}
 	// VM path (no VMI yet)
 	state, phase, requeue = m.mapVMStatus(vm)
-	if err := m.checkVMErrorsAndUpdateStatus(ctx, machine, vm); err != nil {
+	if err := m.checkVMErrorsAndUpdateStatus(ctx, machine, vm, remoteClient); err != nil {
 		logger.Error(err, "Failed to check VM errors")
 	}
 	return
@@ -177,11 +177,11 @@ func (m *StatusManager) mapVMStatus(vm *kubevirtv1.VirtualMachine) (state, phase
 }
 
 // checkVMIErrorsAndUpdateStatus checks for VMI errors and updates machine status accordingly
-func (m *StatusManager) checkVMIErrorsAndUpdateStatus(ctx context.Context, machine *vitistackv1alpha1.Machine, vmi *kubevirtv1.VirtualMachineInstance) error {
+func (m *StatusManager) checkVMIErrorsAndUpdateStatus(ctx context.Context, machine *vitistackv1alpha1.Machine, vmi *kubevirtv1.VirtualMachineInstance, remoteClient client.Client) error {
 	logger := log.FromContext(ctx)
 
-	// Get VMI events to check for errors
-	errorEvents, err := m.EventsManager.GetVMIEvents(ctx, vmi, machine)
+	// Get VMI events from the remote cluster to check for errors
+	errorEvents, err := m.EventsManager.GetVMIEvents(ctx, vmi, machine, remoteClient)
 	if err != nil {
 		logger.Error(err, "Failed to get VMI events")
 		return err
@@ -226,11 +226,11 @@ func (m *StatusManager) checkVMIErrorsAndUpdateStatus(ctx context.Context, machi
 }
 
 // checkVMErrorsAndUpdateStatus checks for VM errors and updates machine status accordingly
-func (m *StatusManager) checkVMErrorsAndUpdateStatus(ctx context.Context, machine *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine) error {
+func (m *StatusManager) checkVMErrorsAndUpdateStatus(ctx context.Context, machine *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine, remoteClient client.Client) error {
 	logger := log.FromContext(ctx)
 
-	// Get VM events to check for errors
-	errorEvents, err := m.EventsManager.GetVMEvents(ctx, vm, machine)
+	// Get VM events from the remote cluster to check for errors
+	errorEvents, err := m.EventsManager.GetVMEvents(ctx, vm, machine, remoteClient)
 	if err != nil {
 		logger.Error(err, "Failed to get VM events")
 		return err
@@ -266,15 +266,15 @@ func (m *StatusManager) checkVMErrorsAndUpdateStatus(ctx context.Context, machin
 	return nil
 }
 
-// updateStatusFromPodVMVMIStatus fetches the Pod created by the VMI and extracts HostIP and PodIP, and update status from VM
-func (m *StatusManager) updateStatusFromPodVMVMIStatus(ctx context.Context, machine *vitistackv1alpha1.Machine, vmi *kubevirtv1.VirtualMachineInstance) error {
+// updateStatusFromPodVMVMIStatus fetches the Pod created by the VMI from the remote cluster and extracts HostIP and PodIP, and update status from VM
+func (m *StatusManager) updateStatusFromPodVMVMIStatus(ctx context.Context, machine *vitistackv1alpha1.Machine, vmi *kubevirtv1.VirtualMachineInstance, remoteClient client.Client) error {
 	logger := log.FromContext(ctx)
 
-	// Get all Pods in the VMI's namespace and find one that contains the VMI name
+	// Get all Pods in the VMI's namespace from the remote cluster and find one that contains the VMI name
 	// KubeVirt creates Pods with names that contain the VMI name but may have additional suffixes
 	podList := &corev1.PodList{}
-	if err := m.List(ctx, podList, client.InNamespace(vmi.Namespace)); err != nil {
-		return fmt.Errorf("failed to list Pods in namespace %s: %w", vmi.Namespace, err)
+	if err := remoteClient.List(ctx, podList, client.InNamespace(vmi.Namespace)); err != nil {
+		return fmt.Errorf("failed to list Pods in namespace %s from remote cluster: %w", vmi.Namespace, err)
 	}
 
 	var matchedPod *corev1.Pod

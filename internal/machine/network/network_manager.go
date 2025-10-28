@@ -24,17 +24,17 @@ func NewManager(c client.Client) *NetworkManager {
 	}
 }
 
-func (m *NetworkManager) GetNetworkConfiguration(ctx context.Context, machine *vitistackv1alpha1.Machine) (*kubevirtv1.Network, error) {
+func (m *NetworkManager) GetNetworkConfiguration(ctx context.Context, machine *vitistackv1alpha1.Machine, remoteClient client.Client) (*kubevirtv1.Network, error) {
 	logger := log.FromContext(ctx)
 
 	if machine == nil {
 		return nil, fmt.Errorf("machine is nil")
 	}
 
-	// Attempt to list NetworkAttachmentDefinitions in the Machine namespace
+	// Attempt to list NetworkAttachmentDefinitions in the Machine namespace from the remote KubeVirt cluster
 	nadList := &netattdefv1.NetworkAttachmentDefinitionList{}
-	if err := m.List(ctx, nadList, client.InNamespace(machine.Namespace)); err != nil {
-		logger.Error(err, "failed to list NetworkAttachmentDefinitions")
+	if err := remoteClient.List(ctx, nadList, client.InNamespace(machine.Namespace)); err != nil {
+		logger.Error(err, "failed to list NetworkAttachmentDefinitions from remote cluster")
 		// Fallback to default pod network if listing fails (e.g. CRD not installed / RBAC)
 		return defaultPodNetwork(), nil
 	}

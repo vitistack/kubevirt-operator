@@ -41,3 +41,6 @@ hack/talos/controlplane.yaml
 hack/talos/worker.yaml
 hack/talos/cluster.kube.config
 main
+
+.env*
+!.env.example

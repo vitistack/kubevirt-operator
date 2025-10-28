@@ -4,6 +4,8 @@ import (
 	"runtime"
 
 	"github.com/spf13/viper"
+	"github.com/vitistack/common/pkg/loggers/vlog"
+	"github.com/vitistack/common/pkg/settings/dotenv"
 	"github.com/vitistack/kubevirt-operator/internal/consts"
 )
 
@@ -21,9 +23,32 @@ func Init() {
 	}
 
 	viper.SetDefault(consts.CPU_MODEL, cpuModel)
-	viper.SetDefault(consts.JSON_LOGGING, true)
+	viper.SetDefault(consts.LOG_JSON, true)
 	viper.SetDefault(consts.LOG_LEVEL, "info")
 	viper.SetDefault(consts.MANAGED_BY, "kubevirt-operator")
 
+	dotenv.LoadDotEnv()
+
 	viper.AutomaticEnv()
+
+	printEnvironmentSettings()
+}
+
+func printEnvironmentSettings() {
+	settings := []string{
+		consts.LOG_JSON,
+		consts.LOG_COLORIZE_LINE,
+		consts.LOG_ADD_CALLER,
+		consts.LOG_DISABLE_STACKTRACE,
+		consts.LOG_UNESCAPED_MULTILINE,
+		consts.LOG_LEVEL,
+	}
+
+	for _, s := range settings {
+		val := viper.Get(s)
+		if val != nil {
+			// #nosec G202
+			vlog.Debug(s + "=" + viper.GetString(s))
+		}
+	}
 }

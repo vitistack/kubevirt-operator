@@ -35,8 +35,8 @@ import (
 	"github.com/vitistack/kubevirt-operator/internal/machine/status"
 	"github.com/vitistack/kubevirt-operator/internal/machine/storage"
 	"github.com/vitistack/kubevirt-operator/internal/machine/vm"
+	"github.com/vitistack/kubevirt-operator/pkg/clients"
 	"github.com/vitistack/kubevirt-operator/pkg/macaddress"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -45,22 +45,22 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // MachineReconciler reconciles a Machine object
 type MachineReconciler struct {
-	client.Client
-	Scheme *runtime.Scheme
+	client.Client // Supervisor cluster client
+	Scheme        *runtime.Scheme
 
 	// Manager instances for different concerns
-	StorageManager *storage.StorageManager
-	VMManager      *vm.VMManager
-	StatusManager  *status.StatusManager
-	EventsManager  *events.EventsManager
-	NetworkManager *network.NetworkManager
-	MacGenerator   macaddress.MacAddressGenerator
+	StorageManager    *storage.StorageManager
+	VMManager         *vm.VMManager
+	StatusManager     *status.StatusManager
+	EventsManager     *events.EventsManager
+	NetworkManager    *network.NetworkManager
+	MacGenerator      macaddress.MacAddressGenerator
+	KubevirtClientMgr clients.ClientManager
 }
 
 const (
@@ -70,6 +70,7 @@ const (
 // +kubebuilder:rbac:groups=vitistack.io,resources=machines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=vitistack.io,resources=machines/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=vitistack.io,resources=machines/finalizers,verbs=update
+// +kubebuilder:rbac:groups=vitistack.io,resources=kubevirtconfigs,verbs=get;list;watch
 // +kubebuilder:rbac:groups=vitistack.io,resources=networkconfigurations,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=vitistack.io,resources=networkconfigurations/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=kubevirt.io,resources=virtualmachines,verbs=get;list;watch;create;update;patch;delete
@@ -79,8 +80,10 @@ const (
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=k8s.cni.cncf.io,resources=network-attachment-definitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=storage.k8s.io,resources=storageclasses,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list
 
 func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -90,18 +93,69 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return result, err
 	}
 
-	virtualmachine, vmName, result, stop, err := r.ensureVirtualMachine(ctx, machine)
+	// Get the remote KubeVirt client for this machine
+	remoteClient, kubevirtConfigName, needsAnnotationUpdate, err := r.KubevirtClientMgr.GetOrCreateClientFromMachine(ctx, machine)
+	if err != nil {
+		logger.Error(err, "Failed to get KubeVirt client for machine")
+		r.recordKubevirtConfigFailure(ctx, machine, err)
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+
+	// Set the remote client in VMManager for VM operations
+	r.VMManager.SetRemoteClient(remoteClient)
+
+	// Update machine annotations with kubevirt config reference if needed
+	// TODO: Update machine status with kubevirt config reference once field is added to CRD
+	if needsAnnotationUpdate {
+		if machine.Annotations == nil {
+			machine.Annotations = make(map[string]string)
+		}
+		machine.Annotations["vitistack.io/kubevirt-config"] = kubevirtConfigName
+		if err := r.Update(ctx, machine); err != nil {
+			logger.Error(err, "Failed to update machine annotations with kubevirt config")
+			// Continue anyway, we can retry on next reconcile
+		} else {
+			logger.Info("Automatically assigned KubevirtConfig to machine",
+				"machine", machine.Name,
+				"kubevirtConfig", kubevirtConfigName)
+		}
+	}
+
+	virtualmachine, vmName, result, stop, err := r.ensureVirtualMachine(ctx, machine, remoteClient)
 	if stop || err != nil {
 		return result, err
 	}
 
-	vmi, vmiExists, err := r.getVMI(ctx, vmName, machine.Namespace)
+	vmi, vmiExists, err := r.getVMI(ctx, vmName, machine.Namespace, remoteClient)
 	if err != nil {
 		logger.Error(err, "Failed to get VirtualMachineInstance")
 		return ctrl.Result{}, err
 	}
 
-	return r.StatusManager.UpdateMachineStatusFromVMAndVMI(ctx, machine, virtualmachine, vmi, vmiExists)
+	return r.StatusManager.UpdateMachineStatusFromVMAndVMI(ctx, machine, virtualmachine, vmi, vmiExists, remoteClient)
+}
+
+// recordKubevirtConfigFailure updates machine status for kubevirt config errors.
+func (r *MachineReconciler) recordKubevirtConfigFailure(ctx context.Context, machine *vitistackv1alpha1.Machine, err error) {
+	logger := log.FromContext(ctx)
+	reason := "Failed to get or create KubeVirt client from config"
+	errorTitle := "KubevirtConfigError"
+	logger.Error(err, reason)
+	if machine.Status.Phase != vitistackv1alpha1.MachinePhaseFailed {
+		machine.Status.Conditions = append(machine.Status.Conditions, vitistackv1alpha1.MachineCondition{
+			Type:    vitistackv1alpha1.ConditionUnknown,
+			Status:  string(metav1.ConditionFalse),
+			Reason:  reason,
+			Message: errorTitle,
+		})
+	}
+	machine.Status.Phase = vitistackv1alpha1.MachinePhaseFailed
+	machine.Status.LastUpdated = metav1.Now()
+	machine.Status.FailureMessage = &errorTitle
+	machine.Status.FailureReason = &reason
+	if statusErr := r.StatusManager.UpdateMachineStatus(ctx, machine, errorTitle); statusErr != nil {
+		logger.Error(statusErr, errorTitle)
+	}
 }
 
 // fetchAndInitMachine retrieves the Machine and handles deletion/finalizer logic.
@@ -157,24 +211,25 @@ func (r *MachineReconciler) fetchAndInitMachine(ctx context.Context, req ctrl.Re
 
 // ensureVirtualMachine fetches or creates the backing VirtualMachine.
 // Returns: vm, vmName, result, stopReconcile, error
-func (r *MachineReconciler) ensureVirtualMachine(ctx context.Context, machine *vitistackv1alpha1.Machine) (*kubevirtv1.VirtualMachine, string, ctrl.Result, bool, error) {
+func (r *MachineReconciler) ensureVirtualMachine(ctx context.Context, machine *vitistackv1alpha1.Machine, remoteClient client.Client) (*kubevirtv1.VirtualMachine, string, ctrl.Result, bool, error) {
 	logger := log.FromContext(ctx)
 	virtualmachine := &kubevirtv1.VirtualMachine{}
 	vmName := fmt.Sprintf("vm-%s", machine.Name)
 	vmKey := types.NamespacedName{Name: vmName, Namespace: machine.Namespace}
 
-	if err := r.Get(ctx, vmKey, virtualmachine); err != nil {
+	// Get VM from remote KubeVirt cluster
+	if err := remoteClient.Get(ctx, vmKey, virtualmachine); err != nil {
 		if !errors.IsNotFound(err) {
-			logger.Error(err, "Failed to get VirtualMachine")
+			logger.Error(err, "Failed to get VirtualMachine from remote cluster")
 			return nil, vmName, ctrl.Result{}, true, err
 		}
 		// Need to create VM
-		networkConfiguration, netErr := r.NetworkManager.GetNetworkConfiguration(ctx, machine)
+		networkConfiguration, netErr := r.NetworkManager.GetNetworkConfiguration(ctx, machine, remoteClient)
 		if netErr != nil {
 			r.recordNetworkFailure(ctx, machine, netErr)
 			return nil, vmName, ctrl.Result{}, true, netErr
 		}
-		pvcNames, pvcErr := r.StorageManager.CreatePVCsFromDiskSpecs(ctx, machine, vmName)
+		pvcNames, pvcErr := r.StorageManager.CreatePVCsFromDiskSpecs(ctx, machine, vmName, remoteClient)
 		if pvcErr != nil {
 			logger.Error(pvcErr, "Failed to create PVCs")
 			_ = r.StatusManager.UpdateMachineStatus(ctx, machine, "Failed")
@@ -182,11 +237,11 @@ func (r *MachineReconciler) ensureVirtualMachine(ctx context.Context, machine *v
 		}
 		newVM, vmErr := r.VMManager.CreateVirtualMachine(ctx, machine, vmName, pvcNames, networkConfiguration)
 		if vmErr != nil {
-			logger.Error(vmErr, "Failed to create VirtualMachine")
+			logger.Error(vmErr, "Failed to create VirtualMachine in remote cluster")
 			_ = r.StatusManager.UpdateMachineStatus(ctx, machine, "Failed")
 			return nil, vmName, ctrl.Result{RequeueAfter: time.Minute}, true, vmErr
 		}
-		logger.Info("Created VirtualMachine", "virtualmachine", newVM.Name)
+		logger.Info("Created VirtualMachine in remote cluster", "virtualmachine", newVM.Name)
 		return newVM, vmName, ctrl.Result{}, false, nil
 	}
 	return virtualmachine, vmName, ctrl.Result{}, false, nil
@@ -215,11 +270,11 @@ func (r *MachineReconciler) recordNetworkFailure(ctx context.Context, machine *v
 	}
 }
 
-// getVMI retrieves the VMI if it exists.
-func (r *MachineReconciler) getVMI(ctx context.Context, vmName, namespace string) (*kubevirtv1.VirtualMachineInstance, bool, error) {
+// getVMI retrieves the VMI if it exists from the remote cluster.
+func (r *MachineReconciler) getVMI(ctx context.Context, vmName, namespace string, remoteClient client.Client) (*kubevirtv1.VirtualMachineInstance, bool, error) {
 	vmi := &kubevirtv1.VirtualMachineInstance{}
 	key := types.NamespacedName{Name: vmName, Namespace: namespace}
-	if err := r.Get(ctx, key, vmi); err != nil {
+	if err := remoteClient.Get(ctx, key, vmi); err != nil {
 		if errors.IsNotFound(err) {
 			return vmi, false, nil
 		}
@@ -232,35 +287,45 @@ func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitista
 	logger := log.FromContext(ctx)
 
 	if controllerutil.ContainsFinalizer(machine, MachineFinalizer) {
-		err := r.VMManager.CleanupNetworkConfiguration(ctx, machine)
+		// Get the remote KubeVirt client for cleanup operations
+		remoteClient, _, _, err := r.KubevirtClientMgr.GetOrCreateClientFromMachine(ctx, machine)
+		if err != nil {
+			logger.Error(err, "Failed to get KubeVirt client for deletion, skipping VM cleanup")
+			// Continue with cleanup of local resources even if remote client fails
+		} else {
+			// Delete associated VirtualMachine from remote cluster
+			r.VMManager.SetRemoteClient(remoteClient)
+			vmName := fmt.Sprintf("vm-%s", machine.Name)
+			virtualMachine := &kubevirtv1.VirtualMachine{}
+			vmNamespacedName := types.NamespacedName{
+				Name:      vmName,
+				Namespace: machine.Namespace,
+			}
+
+			err = remoteClient.Get(ctx, vmNamespacedName, virtualMachine)
+			if err == nil {
+				// VirtualMachine exists, delete it from remote cluster
+				if err := remoteClient.Delete(ctx, virtualMachine); err != nil {
+					logger.Error(err, "Failed to delete VirtualMachine from remote cluster")
+					return err
+				}
+				logger.Info("Deleted VirtualMachine from remote cluster", "virtualmachine", virtualMachine.Name)
+			} else if !errors.IsNotFound(err) {
+				logger.Error(err, "Failed to get VirtualMachine for deletion from remote cluster")
+				return err
+			}
+		}
+
+		// Cleanup network configuration from supervisor cluster
+		err = r.VMManager.CleanupNetworkConfiguration(ctx, machine)
 		if err != nil {
 			logger.Error(err, "Failed to cleanup network configuration")
 			return err
 		}
 
-		// Delete associated VirtualMachine
+		// Delete all associated PVCs from the remote cluster
 		vmName := fmt.Sprintf("vm-%s", machine.Name)
-		virtualMachine := &kubevirtv1.VirtualMachine{}
-		vmNamespacedName := types.NamespacedName{
-			Name:      vmName,
-			Namespace: machine.Namespace,
-		}
-
-		err = r.Get(ctx, vmNamespacedName, virtualMachine)
-		if err == nil {
-			// VirtualMachine exists, delete it
-			if err := r.Delete(ctx, virtualMachine); err != nil {
-				logger.Error(err, "Failed to delete VirtualMachine")
-				return err
-			}
-			logger.Info("Deleted VirtualMachine", "virtualmachine", virtualMachine.Name)
-		} else if !errors.IsNotFound(err) {
-			logger.Error(err, "Failed to get VirtualMachine for deletion")
-			return err
-		}
-
-		// Delete all associated PVCs
-		if err := r.StorageManager.DeleteAssociatedPVCs(ctx, machine, vmName); err != nil {
+		if err := r.StorageManager.DeleteAssociatedPVCs(ctx, machine, vmName, remoteClient); err != nil {
 			logger.Error(err, "Failed to delete associated PVCs")
 			return err
 		}
@@ -314,30 +379,31 @@ func (r *MachineReconciler) getProviderName(machine *vitistackv1alpha1.Machine) 
 }
 
 // NewMachineReconciler creates a new MachineReconciler with initialized managers
-func NewMachineReconciler(c client.Client, scheme *runtime.Scheme) *MachineReconciler {
+func NewMachineReconciler(c client.Client, scheme *runtime.Scheme, kubevirtClientMgr clients.ClientManager) *MachineReconciler {
 	eventsManager := events.NewManager(c)
 	macGenerator := macaddress.NewVitistackMacGenerator()
 	statusManager := status.NewManager(c, eventsManager)
 
 	return &MachineReconciler{
-		Client:         c,
-		Scheme:         scheme,
-		StorageManager: storage.NewManager(c, scheme),
-		VMManager:      vm.NewManager(c, scheme, macGenerator),
-		StatusManager:  statusManager,
-		EventsManager:  eventsManager,
-		NetworkManager: network.NewManager(c),
-		MacGenerator:   macGenerator,
+		Client:            c,
+		Scheme:            scheme,
+		StorageManager:    storage.NewManager(c, scheme),
+		VMManager:         vm.NewManager(c, scheme, macGenerator),
+		StatusManager:     statusManager,
+		EventsManager:     eventsManager,
+		NetworkManager:    network.NewManager(c),
+		MacGenerator:      macGenerator,
+		KubevirtClientMgr: kubevirtClientMgr,
 	}
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// In a multi-cluster architecture, we only watch Machine resources on the supervisor cluster.
+	// VirtualMachine and VirtualMachineInstance resources exist on remote KubeVirt clusters,
+	// not on the supervisor cluster, so we don't set up watches for them here.
+	// Instead, we interact with them directly through the remote clients in the reconciliation loop.
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vitistackv1alpha1.Machine{}).
-		Owns(&kubevirtv1.VirtualMachine{}).
-		Owns(&corev1.PersistentVolumeClaim{}).
-		Watches(&kubevirtv1.VirtualMachineInstance{},
-			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &vitistackv1alpha1.Machine{})).
 		Complete(r)
 }

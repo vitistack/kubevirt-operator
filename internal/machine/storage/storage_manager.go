@@ -31,7 +31,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -49,13 +48,13 @@ func NewManager(c client.Client, scheme *runtime.Scheme) *StorageManager {
 	}
 }
 
-// GetDefaultStorageClass finds and returns the default storage class name
-func (m *StorageManager) GetDefaultStorageClass(ctx context.Context) (string, error) {
+// GetDefaultStorageClass finds and returns the default storage class name from the specified cluster
+func (m *StorageManager) GetDefaultStorageClass(ctx context.Context, clusterClient client.Client) (string, error) {
 	logger := log.FromContext(ctx)
 
-	// List all storage classes
+	// List all storage classes from the specified cluster (remote KubeVirt cluster)
 	storageClasses := &storagev1.StorageClassList{}
-	if err := m.List(ctx, storageClasses); err != nil {
+	if err := clusterClient.List(ctx, storageClasses); err != nil {
 		logger.Error(err, "Failed to list storage classes")
 		return "", err
 	}
@@ -75,12 +74,12 @@ func (m *StorageManager) GetDefaultStorageClass(ctx context.Context) (string, er
 	return "", fmt.Errorf("no default storage class found in the cluster")
 }
 
-// CreatePVCsFromDiskSpecs creates PVCs for each disk in machine.spec.disks
-func (m *StorageManager) CreatePVCsFromDiskSpecs(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string) ([]string, error) {
+// CreatePVCsFromDiskSpecs creates PVCs for each disk in machine.spec.disks on the remote cluster
+func (m *StorageManager) CreatePVCsFromDiskSpecs(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string, remoteClient client.Client) ([]string, error) {
 	logger := log.FromContext(ctx)
 
-	// Get default storage class
-	defaultStorageClass, err := m.GetDefaultStorageClass(ctx)
+	// Get default storage class from the remote KubeVirt cluster
+	defaultStorageClass, err := m.GetDefaultStorageClass(ctx, remoteClient)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get default storage class: %w", err)
 	}
@@ -90,7 +89,7 @@ func (m *StorageManager) CreatePVCsFromDiskSpecs(ctx context.Context, machine *v
 	// If no disks are specified in the spec, create a default root disk
 	if len(machine.Spec.Disks) == 0 {
 		pvcName := fmt.Sprintf("%s-root-pvc", vmName)
-		if err := m.createSinglePVC(ctx, machine, pvcName, "10Gi", defaultStorageClass, true); err != nil {
+		if err := m.createSinglePVC(ctx, machine, pvcName, "10Gi", defaultStorageClass, true, remoteClient); err != nil {
 			return nil, fmt.Errorf("failed to create default root PVC: %w", err)
 		}
 		pvcNames = append(pvcNames, pvcName)
@@ -110,7 +109,7 @@ func (m *StorageManager) CreatePVCsFromDiskSpecs(ctx context.Context, machine *v
 		// Convert sizeGB to storage size string
 		storageSize := fmt.Sprintf("%dGi", disk.SizeGB)
 
-		if err := m.createSinglePVC(ctx, machine, pvcName, storageSize, defaultStorageClass, disk.Boot); err != nil {
+		if err := m.createSinglePVC(ctx, machine, pvcName, storageSize, defaultStorageClass, disk.Boot, remoteClient); err != nil {
 			return nil, fmt.Errorf("failed to create PVC %s: %w", pvcName, err)
 		}
 
@@ -121,13 +120,13 @@ func (m *StorageManager) CreatePVCsFromDiskSpecs(ctx context.Context, machine *v
 	return pvcNames, nil
 }
 
-// createSinglePVC creates a single PVC with the specified parameters
-func (m *StorageManager) createSinglePVC(ctx context.Context, machine *vitistackv1alpha1.Machine, pvcName, storageSize, storageClass string, isBoot bool) error {
+// createSinglePVC creates a single PVC with the specified parameters on the remote cluster
+func (m *StorageManager) createSinglePVC(ctx context.Context, machine *vitistackv1alpha1.Machine, pvcName, storageSize, storageClass string, isBoot bool, remoteClient client.Client) error {
 	logger := log.FromContext(ctx)
 
-	// Check if PVC already exists
+	// Check if PVC already exists on the remote cluster
 	existingPVC := &corev1.PersistentVolumeClaim{}
-	err := m.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: machine.Namespace}, existingPVC)
+	err := remoteClient.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: machine.Namespace}, existingPVC)
 	if err == nil {
 		// PVC already exists, skip creation
 		logger.V(1).Info("PVC already exists, skipping creation", "pvc", pvcName)
@@ -166,12 +165,13 @@ func (m *StorageManager) createSinglePVC(ctx context.Context, machine *vitistack
 		},
 	}
 
-	// Set Machine as the owner of the PVC - note: this needs the scheme from the reconciler
-	if err := controllerutil.SetControllerReference(machine, pvc, m.Scheme); err != nil {
-		return err
-	}
+	// Note: We do NOT set Machine as the owner reference for the PVC because
+	// they exist in different clusters (Machine on supervisor, PVC on remote KubeVirt cluster).
+	// Cross-cluster owner references are not supported in Kubernetes.
+	// Instead, we rely on labels (source-machine, managed-by) for tracking and cleanup.
 
-	if err := m.Create(ctx, pvc); err != nil {
+	// Create PVC on the remote KubeVirt cluster
+	if err := remoteClient.Create(ctx, pvc); err != nil {
 		return err
 	}
 
@@ -179,11 +179,11 @@ func (m *StorageManager) createSinglePVC(ctx context.Context, machine *vitistack
 	return nil
 }
 
-// DeleteAssociatedPVCs deletes all PVCs associated with a machine
-func (m *StorageManager) DeleteAssociatedPVCs(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string) error {
+// DeleteAssociatedPVCs deletes all PVCs associated with a machine from the remote cluster
+func (m *StorageManager) DeleteAssociatedPVCs(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string, remoteClient client.Client) error {
 	logger := log.FromContext(ctx)
 
-	// List all PVCs in the namespace with the machine's label
+	// List all PVCs in the namespace with the machine's label from the remote cluster
 	pvcList := &corev1.PersistentVolumeClaimList{}
 	listOpts := []client.ListOption{
 		client.InNamespace(machine.Namespace),
@@ -193,7 +193,7 @@ func (m *StorageManager) DeleteAssociatedPVCs(ctx context.Context, machine *viti
 		},
 	}
 
-	if err := m.List(ctx, pvcList, listOpts...); err != nil {
+	if err := remoteClient.List(ctx, pvcList, listOpts...); err != nil {
 		logger.Error(err, "Failed to list PVCs for deletion")
 		return err
 	}
@@ -201,7 +201,7 @@ func (m *StorageManager) DeleteAssociatedPVCs(ctx context.Context, machine *viti
 	// Delete each PVC (index loop to avoid copying large structs each iteration)
 	for i := range pvcList.Items {
 		pvc := &pvcList.Items[i]
-		if err := m.Delete(ctx, pvc); err != nil {
+		if err := remoteClient.Delete(ctx, pvc); err != nil {
 			logger.Error(err, "Failed to delete PVC", "pvc", pvc.Name)
 			return err
 		}
@@ -216,10 +216,10 @@ func (m *StorageManager) DeleteAssociatedPVCs(ctx context.Context, machine *viti
 		Namespace: machine.Namespace,
 	}
 
-	err := m.Get(ctx, legacyPVCNamespacedName, legacyPVC)
+	err := remoteClient.Get(ctx, legacyPVCNamespacedName, legacyPVC)
 	if err == nil {
 		// Legacy PVC exists, delete it
-		if err := m.Delete(ctx, legacyPVC); err != nil {
+		if err := remoteClient.Delete(ctx, legacyPVC); err != nil {
 			logger.Error(err, "Failed to delete legacy PVC")
 			return err
 		}
