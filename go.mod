@@ -1,6 +1,6 @@
 module github.com/vitistack/kubevirt-operator
 
-go 1.25.2
+go 1.25.3
 
 godebug default=go1.25
 
@@ -9,14 +9,14 @@ require (
 	github.com/onsi/ginkgo/v2 v2.27.2
 	github.com/onsi/gomega v1.38.2
 	github.com/spf13/viper v1.21.0
-	github.com/vitistack/common v0.0.20
+	github.com/vitistack/common v0.0.22
 	github.com/vitistack/crds v0.3.2
 	k8s.io/api v0.34.1
 	k8s.io/apimachinery v0.34.1
 	k8s.io/client-go v0.34.1
 	k8s.io/klog/v2 v2.130.1
 	kubevirt.io/api v1.6.2
-	sigs.k8s.io/controller-runtime v0.22.3
+	sigs.k8s.io/controller-runtime v0.22.4
 )
 
 require (
