@@ -1,0 +1,31 @@
+---
+# Example: Machine in a custom namespace
+# The operator will automatically create the namespace on the remote KubeVirt cluster if it doesn't exist
+# Note: The Machine CRD is created on the supervisor cluster, but the VM and PVCs
+# will be created in the same namespace on the remote KubeVirt cluster
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: my-custom-namespace
+  labels:
+    environment: development
+---
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: test-machine
+  namespace: my-custom-namespace # This namespace will be created on the remote KubeVirt cluster
+spec:
+  instanceType: small
+  cpu:
+    cores: 2
+  memory: 2147483648 # 2Gi in bytes
+  disks:
+    - name: root
+      sizeGB: 20
+      boot: true
+  # The operator will:
+  # 1. Check if "my-custom-namespace" exists on the remote KubeVirt cluster
+  # 2. Create it if it doesn't exist (with managed-by label)
+  # 3. Create the VirtualMachine, PVCs, and other resources in that namespace

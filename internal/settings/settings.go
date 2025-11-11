@@ -23,9 +23,12 @@ func Init() {
 	}
 
 	viper.SetDefault(consts.CPU_MODEL, cpuModel)
+	viper.SetDefault(consts.CNI_VERSION, "1.0.0")
 	viper.SetDefault(consts.LOG_JSON, true)
 	viper.SetDefault(consts.LOG_LEVEL, "info")
 	viper.SetDefault(consts.MANAGED_BY, "kubevirt-operator")
+	viper.SetDefault(consts.VM_NAME_PREFIX, "vm-")
+	viper.SetDefault(consts.PVC_VOLUME_MODE, "Block") // Options: "Block" (default) or "Filesystem"
 
 	dotenv.LoadDotEnv()
 

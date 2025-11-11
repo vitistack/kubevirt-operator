@@ -29,7 +29,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/viper"
 	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
+	"github.com/vitistack/kubevirt-operator/internal/consts"
 	"github.com/vitistack/kubevirt-operator/internal/machine/events"
 	"github.com/vitistack/kubevirt-operator/internal/machine/network"
 	"github.com/vitistack/kubevirt-operator/internal/machine/status"
@@ -37,6 +39,7 @@ import (
 	"github.com/vitistack/kubevirt-operator/internal/machine/vm"
 	"github.com/vitistack/kubevirt-operator/pkg/clients"
 	"github.com/vitistack/kubevirt-operator/pkg/macaddress"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -81,6 +84,7 @@ const (
 // +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=k8s.cni.cncf.io,resources=network-attachment-definitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=storage.k8s.io,resources=storageclasses,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list
@@ -103,6 +107,12 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// Set the remote client in VMManager for VM operations
 	r.VMManager.SetRemoteClient(remoteClient)
+
+	// Ensure the namespace exists on the remote KubeVirt cluster
+	if err := r.ensureNamespaceExists(ctx, machine.Namespace, remoteClient); err != nil {
+		logger.Error(err, "Failed to ensure namespace exists on remote cluster")
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
 
 	// Update machine annotations with kubevirt config reference if needed
 	// TODO: Update machine status with kubevirt config reference once field is added to CRD
@@ -133,6 +143,41 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	return r.StatusManager.UpdateMachineStatusFromVMAndVMI(ctx, machine, virtualmachine, vmi, vmiExists, remoteClient)
+}
+
+// ensureNamespaceExists creates the namespace on the remote cluster if it doesn't exist
+func (r *MachineReconciler) ensureNamespaceExists(ctx context.Context, namespaceName string, remoteClient client.Client) error {
+	logger := log.FromContext(ctx)
+
+	namespace := &corev1.Namespace{}
+	err := remoteClient.Get(ctx, types.NamespacedName{Name: namespaceName}, namespace)
+	if err == nil {
+		// Namespace exists
+		logger.V(1).Info("Namespace already exists on remote cluster", "namespace", namespaceName)
+		return nil
+	}
+
+	if !errors.IsNotFound(err) {
+		// Some other error occurred
+		return fmt.Errorf("failed to check if namespace exists: %w", err)
+	}
+
+	// Namespace doesn't exist, create it
+	namespace = &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: namespaceName,
+			Labels: map[string]string{
+				"managed-by": viper.GetString(consts.MANAGED_BY),
+			},
+		},
+	}
+
+	if err := remoteClient.Create(ctx, namespace); err != nil {
+		return fmt.Errorf("failed to create namespace on remote cluster: %w", err)
+	}
+
+	logger.Info("Created namespace on remote cluster", "namespace", namespaceName)
+	return nil
 }
 
 // recordKubevirtConfigFailure updates machine status for kubevirt config errors.
@@ -187,10 +232,8 @@ func (r *MachineReconciler) fetchAndInitMachine(ctx context.Context, req ctrl.Re
 	}
 
 	if machine.GetDeletionTimestamp() != nil {
-		if err := r.handleDeletion(ctx, machine); err != nil {
-			return machine, ctrl.Result{}, true, err
-		}
-		return machine, ctrl.Result{}, true, nil
+		result, err := r.handleDeletion(ctx, machine)
+		return machine, result, true, err
 	}
 
 	if !controllerutil.ContainsFinalizer(machine, MachineFinalizer) {
@@ -214,7 +257,7 @@ func (r *MachineReconciler) fetchAndInitMachine(ctx context.Context, req ctrl.Re
 func (r *MachineReconciler) ensureVirtualMachine(ctx context.Context, machine *vitistackv1alpha1.Machine, remoteClient client.Client) (*kubevirtv1.VirtualMachine, string, ctrl.Result, bool, error) {
 	logger := log.FromContext(ctx)
 	virtualmachine := &kubevirtv1.VirtualMachine{}
-	vmName := fmt.Sprintf("vm-%s", machine.Name)
+	vmName := fmt.Sprintf("%s%s", viper.GetString(consts.VM_NAME_PREFIX), machine.Name)
 	vmKey := types.NamespacedName{Name: vmName, Namespace: machine.Namespace}
 
 	// Get VM from remote KubeVirt cluster
@@ -223,19 +266,14 @@ func (r *MachineReconciler) ensureVirtualMachine(ctx context.Context, machine *v
 			logger.Error(err, "Failed to get VirtualMachine from remote cluster")
 			return nil, vmName, ctrl.Result{}, true, err
 		}
-		// Need to create VM
-		networkConfiguration, netErr := r.NetworkManager.GetNetworkConfiguration(ctx, machine, remoteClient)
-		if netErr != nil {
-			r.recordNetworkFailure(ctx, machine, netErr)
-			return nil, vmName, ctrl.Result{}, true, netErr
-		}
+
 		pvcNames, pvcErr := r.StorageManager.CreatePVCsFromDiskSpecs(ctx, machine, vmName, remoteClient)
 		if pvcErr != nil {
 			logger.Error(pvcErr, "Failed to create PVCs")
 			_ = r.StatusManager.UpdateMachineStatus(ctx, machine, "Failed")
 			return nil, vmName, ctrl.Result{RequeueAfter: time.Minute}, true, pvcErr
 		}
-		newVM, vmErr := r.VMManager.CreateVirtualMachine(ctx, machine, vmName, pvcNames, networkConfiguration)
+		newVM, vmErr := r.VMManager.CreateVirtualMachine(ctx, machine, vmName, pvcNames)
 		if vmErr != nil {
 			logger.Error(vmErr, "Failed to create VirtualMachine in remote cluster")
 			_ = r.StatusManager.UpdateMachineStatus(ctx, machine, "Failed")
@@ -245,29 +283,6 @@ func (r *MachineReconciler) ensureVirtualMachine(ctx context.Context, machine *v
 		return newVM, vmName, ctrl.Result{}, false, nil
 	}
 	return virtualmachine, vmName, ctrl.Result{}, false, nil
-}
-
-// recordNetworkFailure updates machine status for network configuration errors.
-func (r *MachineReconciler) recordNetworkFailure(ctx context.Context, machine *vitistackv1alpha1.Machine, err error) {
-	logger := log.FromContext(ctx)
-	reason := "Failed to get network configuration in current namespace"
-	errorTitle := "NetworkConfigurationError"
-	logger.Error(err, reason)
-	if machine.Status.Phase != vitistackv1alpha1.MachinePhaseFailed {
-		machine.Status.Conditions = append(machine.Status.Conditions, vitistackv1alpha1.MachineCondition{
-			Type:    vitistackv1alpha1.ConditionUnknown,
-			Status:  string(metav1.ConditionFalse),
-			Reason:  reason,
-			Message: errorTitle,
-		})
-	}
-	machine.Status.Phase = vitistackv1alpha1.MachinePhaseFailed
-	machine.Status.LastUpdated = metav1.Now()
-	machine.Status.FailureMessage = &errorTitle
-	machine.Status.FailureReason = &reason
-	if statusErr := r.StatusManager.UpdateMachineStatus(ctx, machine, errorTitle); statusErr != nil {
-		logger.Error(statusErr, errorTitle)
-	}
 }
 
 // getVMI retrieves the VMI if it exists from the remote cluster.
@@ -283,80 +298,200 @@ func (r *MachineReconciler) getVMI(ctx context.Context, vmName, namespace string
 	return vmi, true, nil
 }
 
-func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitistackv1alpha1.Machine) error {
+func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitistackv1alpha1.Machine) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	if controllerutil.ContainsFinalizer(machine, MachineFinalizer) {
-		// Get the remote KubeVirt client for cleanup operations
-		remoteClient, _, _, err := r.KubevirtClientMgr.GetOrCreateClientFromMachine(ctx, machine)
-		if err != nil {
-			logger.Error(err, "Failed to get KubeVirt client for deletion, skipping VM cleanup")
-			// Continue with cleanup of local resources even if remote client fails
-		} else {
-			// Delete associated VirtualMachine from remote cluster
-			r.VMManager.SetRemoteClient(remoteClient)
-			vmName := fmt.Sprintf("vm-%s", machine.Name)
-			virtualMachine := &kubevirtv1.VirtualMachine{}
-			vmNamespacedName := types.NamespacedName{
-				Name:      vmName,
-				Namespace: machine.Namespace,
-			}
+	if !controllerutil.ContainsFinalizer(machine, MachineFinalizer) {
+		return ctrl.Result{}, nil
+	}
 
-			err = remoteClient.Get(ctx, vmNamespacedName, virtualMachine)
-			if err == nil {
-				// VirtualMachine exists, delete it from remote cluster
-				if err := remoteClient.Delete(ctx, virtualMachine); err != nil {
-					logger.Error(err, "Failed to delete VirtualMachine from remote cluster")
-					return err
-				}
-				logger.Info("Deleted VirtualMachine from remote cluster", "virtualmachine", virtualMachine.Name)
-			} else if !errors.IsNotFound(err) {
-				logger.Error(err, "Failed to get VirtualMachine for deletion from remote cluster")
-				return err
-			}
-		}
-
-		// Cleanup network configuration from supervisor cluster
-		err = r.VMManager.CleanupNetworkConfiguration(ctx, machine)
-		if err != nil {
-			logger.Error(err, "Failed to cleanup network configuration")
-			return err
-		}
-
-		// Delete all associated PVCs from the remote cluster
-		vmName := fmt.Sprintf("vm-%s", machine.Name)
-		if err := r.StorageManager.DeleteAssociatedPVCs(ctx, machine, vmName, remoteClient); err != nil {
-			logger.Error(err, "Failed to delete associated PVCs")
-			return err
-		}
-
-		// Fetch the latest version of the machine before removing finalizer
-		// This ensures we have the correct UID and ResourceVersion
-		latestMachine := &vitistackv1alpha1.Machine{}
-		if err := r.Get(ctx, types.NamespacedName{Name: machine.Name, Namespace: machine.Namespace}, latestMachine); err != nil {
-			if errors.IsNotFound(err) {
-				// Machine already deleted, cleanup is complete
-				logger.V(1).Info("Machine already deleted, cleanup complete")
-				return nil
-			}
-			logger.Error(err, "Failed to get latest Machine before finalizer removal")
-			return err
-		}
-
-		// Remove finalizer
-		controllerutil.RemoveFinalizer(latestMachine, MachineFinalizer)
-		if err := r.Update(ctx, latestMachine); err != nil {
-			if errors.IsConflict(err) {
-				// Conflict during deletion cleanup - requeue to retry
-				logger.V(1).Info("Conflict removing finalizer during deletion, will retry")
-				return err
-			}
-			logger.Error(err, "Failed to remove finalizer from Machine")
-			return err
+	// Get the remote KubeVirt client for cleanup operations
+	remoteClient, _, _, err := r.KubevirtClientMgr.GetOrCreateClientFromMachine(ctx, machine)
+	if err != nil {
+		logger.Error(err, "Failed to get KubeVirt client for deletion, skipping VM cleanup")
+		// Continue with cleanup of local resources even if remote client fails
+	} else {
+		// Cleanup resources on remote cluster
+		result, err := r.cleanupRemoteResources(ctx, machine, remoteClient)
+		if err != nil || result.RequeueAfter > 0 {
+			return result, err
 		}
 	}
 
+	// Cleanup network configuration from supervisor cluster
+	if err := r.VMManager.CleanupNetworkConfiguration(ctx, machine); err != nil {
+		logger.Error(err, "Failed to cleanup network configuration")
+		return ctrl.Result{}, err
+	}
+
+	// Remove finalizer
+	if err := r.removeMachineFinalizer(ctx, machine); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// cleanupRemoteResources handles cleanup of VM, PVCs, and NAD on the remote KubeVirt cluster
+func (r *MachineReconciler) cleanupRemoteResources(ctx context.Context, machine *vitistackv1alpha1.Machine, remoteClient client.Client) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	r.VMManager.SetRemoteClient(remoteClient)
+	vmName := fmt.Sprintf("vm-%s", machine.Name)
+	vmNamespacedName := types.NamespacedName{
+		Name:      vmName,
+		Namespace: machine.Namespace,
+	}
+
+	// Check if we already have a NAD name stored from a previous reconcile
+	nadName := ""
+	if machine.Annotations != nil {
+		nadName = machine.Annotations["vitistack.io/nad-to-cleanup"]
+	}
+
+	// If no NAD name stored yet, try to get and delete the VirtualMachine
+	if nadName == "" {
+		var err error
+		nadName, err = r.deleteVirtualMachine(ctx, vmNamespacedName, remoteClient)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		// Store NAD name in annotation if found, so we don't lose it on requeue
+		if nadName != "" {
+			if machine.Annotations == nil {
+				machine.Annotations = make(map[string]string)
+			}
+			machine.Annotations["vitistack.io/nad-to-cleanup"] = nadName
+			if err := r.Update(ctx, machine); err != nil {
+				logger.Error(err, "Failed to store NAD name in machine annotations")
+				// Continue anyway, we'll try again
+			}
+		}
+	}
+
+	// Wait for VM to be fully removed
+	vmExists := true
+	checkVM := &kubevirtv1.VirtualMachine{}
+	if err := remoteClient.Get(ctx, vmNamespacedName, checkVM); err != nil {
+		if errors.IsNotFound(err) {
+			vmExists = false
+		} else {
+			logger.Error(err, "Failed to verify VirtualMachine deletion")
+			return ctrl.Result{}, err
+		}
+	}
+
+	if vmExists {
+		// VM still exists, requeue to wait for deletion to complete
+		logger.Info("VirtualMachine deletion in progress, requeuing to complete cleanup",
+			"virtualmachine", vmNamespacedName.Name,
+			"nadName", nadName)
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	// VM is fully deleted, proceed with cleanup
+	logger.Info("VirtualMachine fully deleted, proceeding with resource cleanup",
+		"virtualmachine", vmNamespacedName.Name,
+		"nadName", nadName)
+
+	// Delete all associated PVCs from the remote cluster
+	if err := r.StorageManager.DeleteAssociatedPVCs(ctx, machine, vmName, remoteClient); err != nil {
+		logger.Error(err, "Failed to delete associated PVCs")
+		return ctrl.Result{}, err
+	}
+
+	// Cleanup NetworkAttachmentDefinition if no other VMs are using it
+	if nadName != "" {
+		if err := r.NetworkManager.CleanupNetworkAttachmentDefinition(ctx, nadName, machine.Namespace, remoteClient); err != nil {
+			logger.Error(err, "Failed to cleanup NetworkAttachmentDefinition",
+				"nad", nadName,
+				"namespace", machine.Namespace)
+			// Don't return error, continue with other cleanup
+		}
+
+		// Remove the NAD annotation now that we're done
+		delete(machine.Annotations, "vitistack.io/nad-to-cleanup")
+		if err := r.Update(ctx, machine); err != nil {
+			logger.Error(err, "Failed to remove NAD annotation")
+			// Continue anyway
+		}
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// deleteVirtualMachine deletes the VM and returns the NAD name if found
+func (r *MachineReconciler) deleteVirtualMachine(ctx context.Context, vmNamespacedName types.NamespacedName, remoteClient client.Client) (string, error) {
+	logger := log.FromContext(ctx)
+
+	virtualMachine := &kubevirtv1.VirtualMachine{}
+	err := remoteClient.Get(ctx, vmNamespacedName, virtualMachine)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return "", nil
+		}
+		logger.Error(err, "Failed to get VirtualMachine for deletion from remote cluster")
+		return "", err
+	}
+
+	// Extract NAD name from VM networks before deletion
+	nadName := r.extractNADNameFromVM(virtualMachine)
+
+	// VirtualMachine exists, delete it from remote cluster
+	if err := remoteClient.Delete(ctx, virtualMachine); err != nil {
+		logger.Error(err, "Failed to delete VirtualMachine from remote cluster")
+		return "", err
+	}
+	logger.Info("Deleted VirtualMachine from remote cluster", "virtualmachine", virtualMachine.Name)
+
+	return nadName, nil
+}
+
+// removeMachineFinalizer fetches the latest machine and removes the finalizer
+func (r *MachineReconciler) removeMachineFinalizer(ctx context.Context, machine *vitistackv1alpha1.Machine) error {
+	logger := log.FromContext(ctx)
+
+	// Fetch the latest version of the machine before removing finalizer
+	latestMachine := &vitistackv1alpha1.Machine{}
+	if err := r.Get(ctx, types.NamespacedName{Name: machine.Name, Namespace: machine.Namespace}, latestMachine); err != nil {
+		if errors.IsNotFound(err) {
+			logger.V(1).Info("Machine already deleted, cleanup complete")
+			return nil
+		}
+		logger.Error(err, "Failed to get latest Machine before finalizer removal")
+		return err
+	}
+
+	// Remove finalizer
+	controllerutil.RemoveFinalizer(latestMachine, MachineFinalizer)
+	if err := r.Update(ctx, latestMachine); err != nil {
+		if errors.IsConflict(err) {
+			logger.V(1).Info("Conflict removing finalizer during deletion, will retry")
+			return err
+		}
+		logger.Error(err, "Failed to remove finalizer from Machine")
+		return err
+	}
+
 	return nil
+}
+
+// extractNADNameFromVM extracts the NetworkAttachmentDefinition name from a VirtualMachine
+func (r *MachineReconciler) extractNADNameFromVM(virtualMachine *kubevirtv1.VirtualMachine) string {
+	if virtualMachine.Spec.Template == nil {
+		return ""
+	}
+
+	// Look for Multus networks in the VM spec
+	for i := range virtualMachine.Spec.Template.Spec.Networks {
+		net := &virtualMachine.Spec.Template.Spec.Networks[i]
+		if net.Multus != nil && net.Multus.NetworkName != "" {
+			return net.Multus.NetworkName
+		}
+	}
+
+	return ""
 }
 
 // isKubevirtProvider returns true if the Machine's provider is kubevirt.
@@ -388,7 +523,7 @@ func NewMachineReconciler(c client.Client, scheme *runtime.Scheme, kubevirtClien
 		Client:            c,
 		Scheme:            scheme,
 		StorageManager:    storage.NewManager(c, scheme),
-		VMManager:         vm.NewManager(c, scheme, macGenerator),
+		VMManager:         vm.NewManager(c, scheme, macGenerator, statusManager),
 		StatusManager:     statusManager,
 		EventsManager:     eventsManager,
 		NetworkManager:    network.NewManager(c),

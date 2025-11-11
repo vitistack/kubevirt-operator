@@ -21,15 +21,14 @@ import (
 	"fmt"
 
 	"github.com/spf13/viper"
-	"github.com/vitistack/crds/pkg/unstructuredutil"
 	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/internal/consts"
 	"github.com/vitistack/kubevirt-operator/internal/machine/network"
+	"github.com/vitistack/kubevirt-operator/internal/machine/status"
 	"github.com/vitistack/kubevirt-operator/pkg/macaddress"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -44,16 +43,19 @@ type VMManager struct {
 	Scheme           *runtime.Scheme
 	NetworkManager   *network.NetworkManager
 	MacGenerator     macaddress.MacAddressGenerator
+	StatusManager    *status.StatusManager
 }
 
 // NewManager creates a new VM manager
 // The client parameter is the supervisor cluster client
-func NewManager(c client.Client, scheme *runtime.Scheme, macGenerator macaddress.MacAddressGenerator) *VMManager {
+func NewManager(c client.Client, scheme *runtime.Scheme, macGenerator macaddress.MacAddressGenerator, statusManager *status.StatusManager) *VMManager {
 	return &VMManager{
 		supervisorClient: c,
 		remoteClient:     c, // Default to supervisor client for backward compatibility
 		Scheme:           scheme,
 		MacGenerator:     macGenerator,
+		StatusManager:    statusManager,
+		NetworkManager:   network.NewManager(c), // Initialize NetworkManager with supervisor client
 	}
 }
 
@@ -64,7 +66,7 @@ func (m *VMManager) SetRemoteClient(remoteClient client.Client) {
 }
 
 // CreateVirtualMachine creates a KubeVirt VirtualMachine with the specified disks and volumes
-func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string, pvcNames []string, networkConfiguration *kubevirtv1.Network) (*kubevirtv1.VirtualMachine, error) {
+func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string, pvcNames []string) (*kubevirtv1.VirtualMachine, error) {
 	logger := log.FromContext(ctx)
 
 	// Build disks and volumes from the disk specs
@@ -72,6 +74,12 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 
 	// Calculate resource requirements
 	memoryRequest, cpuRequest := m.calculateResourceRequirements(machine)
+
+	networkConfiguration, netErr := m.NetworkManager.GetOrCreateNetworkConfiguration(ctx, machine, m.remoteClient)
+	if netErr != nil {
+		m.recordNetworkFailure(ctx, machine, netErr)
+		return nil, netErr
+	}
 
 	// Create a local variable for RunStrategy since we need its address
 	// Using RunStrategyAlways to ensure the VM starts automatically (replaces deprecated Running: true)
@@ -157,6 +165,29 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 
 	logger.Info("Successfully created VirtualMachine", "virtualmachine", vm.Name, "disks", len(disks), "volumes", len(volumes))
 	return vm, nil
+}
+
+// recordNetworkFailure updates machine status for network configuration errors.
+func (m *VMManager) recordNetworkFailure(ctx context.Context, machine *vitistackv1alpha1.Machine, err error) {
+	logger := log.FromContext(ctx)
+	reason := "Failed to get network configuration in current namespace"
+	errorTitle := "NetworkConfigurationError"
+	logger.Error(err, reason)
+	if machine.Status.Phase != vitistackv1alpha1.MachinePhaseFailed {
+		machine.Status.Conditions = append(machine.Status.Conditions, vitistackv1alpha1.MachineCondition{
+			Type:    vitistackv1alpha1.ConditionUnknown,
+			Status:  string(metav1.ConditionFalse),
+			Reason:  reason,
+			Message: errorTitle,
+		})
+	}
+	machine.Status.Phase = vitistackv1alpha1.MachinePhaseFailed
+	machine.Status.LastUpdated = metav1.Now()
+	machine.Status.FailureMessage = &errorTitle
+	machine.Status.FailureReason = &reason
+	if statusErr := m.StatusManager.UpdateMachineStatus(ctx, machine, errorTitle); statusErr != nil {
+		logger.Error(statusErr, errorTitle)
+	}
 }
 
 // calculateResourceRequirements determines CPU and memory requirements based on machine spec
@@ -303,19 +334,16 @@ func (m *VMManager) persistMacAddressesToNetworkConfiguration(ctx context.Contex
 		MacAddress: macAddress,
 	}
 
-	// Try to get existing NetworkConfiguration as unstructured
-	unstructuredNetConfig := &unstructured.Unstructured{}
-	unstructuredNetConfig.SetGroupVersionKind(vitistackv1alpha1.GroupVersion.WithKind("NetworkConfiguration"))
-
-	// Get from supervisor cluster
-	err := m.supervisorClient.Get(ctx, client.ObjectKey{Name: machine.Name, Namespace: machine.Namespace}, unstructuredNetConfig)
+	// Try to get existing NetworkConfiguration using typed struct
+	existingNetConfig := &vitistackv1alpha1.NetworkConfiguration{}
+	err := m.supervisorClient.Get(ctx, client.ObjectKey{Name: machine.Name, Namespace: machine.Namespace}, existingNetConfig)
 
 	if err != nil {
 		if client.IgnoreNotFound(err) != nil {
 			return fmt.Errorf("failed to get NetworkConfiguration: %w", err)
 		}
 
-		// Create new NetworkConfiguration as typed object
+		// NetworkConfiguration doesn't exist, create a new one
 		netConfig := &vitistackv1alpha1.NetworkConfiguration{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      machine.Name,
@@ -334,22 +362,13 @@ func (m *VMManager) persistMacAddressesToNetworkConfiguration(ctx context.Contex
 			},
 		}
 
-		// Convert to unstructured for creation
-		unstructuredNew, err := unstructuredutil.NetworkConfigurationToUnstructured(netConfig)
-		if err != nil {
-			return fmt.Errorf("failed to convert NetworkConfiguration to unstructured: %w", err)
-		}
-
-		// Ensure GVK is set explicitly
-		unstructuredNew.SetGroupVersionKind(vitistackv1alpha1.GroupVersion.WithKind("NetworkConfiguration"))
-
-		// Set Machine as the owner of the NetworkConfiguration (on unstructured object)
-		if err := controllerutil.SetControllerReference(machine, unstructuredNew, m.Scheme); err != nil {
+		// Set Machine as the owner of the NetworkConfiguration
+		if err := controllerutil.SetControllerReference(machine, netConfig, m.Scheme); err != nil {
 			return fmt.Errorf("failed to set controller reference: %w", err)
 		}
 
 		// Create in supervisor cluster
-		if err := m.supervisorClient.Create(ctx, unstructuredNew); err != nil {
+		if err := m.supervisorClient.Create(ctx, netConfig); err != nil {
 			return fmt.Errorf("failed to create NetworkConfiguration: %w", err)
 		}
 
@@ -357,14 +376,8 @@ func (m *VMManager) persistMacAddressesToNetworkConfiguration(ctx context.Contex
 		return nil
 	}
 
-	// Convert unstructured to typed NetworkConfiguration
-	existingNetConfig, err := unstructuredutil.NetworkConfigurationFromUnstructured(unstructuredNetConfig)
-	if err != nil {
-		return fmt.Errorf("failed to convert unstructured to NetworkConfiguration: %w", err)
-	}
-
-	// Update existing NetworkConfiguration
-	// Check if interface with this MAC already exists
+	// NetworkConfiguration exists, update it
+	// Check if interface with this network name already exists
 	interfaceExists := false
 	for i := range existingNetConfig.Spec.NetworkInterfaces {
 		iface := &existingNetConfig.Spec.NetworkInterfaces[i]
@@ -380,17 +393,8 @@ func (m *VMManager) persistMacAddressesToNetworkConfiguration(ctx context.Contex
 		existingNetConfig.Spec.NetworkInterfaces = append(existingNetConfig.Spec.NetworkInterfaces, networkInterface)
 	}
 
-	// Convert back to unstructured for update
-	unstructuredUpdated, err := unstructuredutil.NetworkConfigurationToUnstructured(existingNetConfig)
-	if err != nil {
-		return fmt.Errorf("failed to convert updated NetworkConfiguration to unstructured: %w", err)
-	}
-
-	// Ensure GVK is set explicitly
-	unstructuredUpdated.SetGroupVersionKind(vitistackv1alpha1.GroupVersion.WithKind("NetworkConfiguration"))
-
 	// Update in supervisor cluster
-	if err := m.supervisorClient.Update(ctx, unstructuredUpdated); err != nil {
+	if err := m.supervisorClient.Update(ctx, existingNetConfig); err != nil {
 		return fmt.Errorf("failed to update NetworkConfiguration: %w", err)
 	}
 
@@ -402,12 +406,9 @@ func (m *VMManager) persistMacAddressesToNetworkConfiguration(ctx context.Contex
 func (m *VMManager) CleanupNetworkConfiguration(ctx context.Context, machine *vitistackv1alpha1.Machine) error {
 	logger := log.FromContext(ctx)
 
-	// Try to get existing NetworkConfiguration as unstructured
-	unstructuredNetConfig := &unstructured.Unstructured{}
-	unstructuredNetConfig.SetGroupVersionKind(vitistackv1alpha1.GroupVersion.WithKind("NetworkConfiguration"))
-
-	// Get from supervisor cluster
-	err := m.supervisorClient.Get(ctx, client.ObjectKey{Name: machine.Name, Namespace: machine.Namespace}, unstructuredNetConfig)
+	// Try to get existing NetworkConfiguration using typed struct
+	netConfig := &vitistackv1alpha1.NetworkConfiguration{}
+	err := m.supervisorClient.Get(ctx, client.ObjectKey{Name: machine.Name, Namespace: machine.Namespace}, netConfig)
 	if err != nil {
 		if client.IgnoreNotFound(err) != nil {
 			return fmt.Errorf("failed to get NetworkConfiguration: %w", err)
@@ -417,14 +418,8 @@ func (m *VMManager) CleanupNetworkConfiguration(ctx context.Context, machine *vi
 		return nil
 	}
 
-	// Convert unstructured to typed NetworkConfiguration for validation
-	netConfig, err := unstructuredutil.NetworkConfigurationFromUnstructured(unstructuredNetConfig)
-	if err != nil {
-		return fmt.Errorf("failed to convert unstructured to NetworkConfiguration: %w", err)
-	}
-
 	// Validate labels match expected values
-	labels := unstructuredNetConfig.GetLabels()
+	labels := netConfig.GetLabels()
 	expectedManagedBy := viper.GetString(consts.MANAGED_BY)
 	if managedBy, ok := labels["managed-by"]; !ok || managedBy != expectedManagedBy {
 		logger.Info("NetworkConfiguration has unexpected managed-by label, skipping deletion",
@@ -470,7 +465,7 @@ func (m *VMManager) CleanupNetworkConfiguration(ctx context.Context, machine *vi
 	}
 
 	// Delete the NetworkConfiguration from supervisor cluster
-	if err := m.supervisorClient.Delete(ctx, unstructuredNetConfig); err != nil {
+	if err := m.supervisorClient.Delete(ctx, netConfig); err != nil {
 		return fmt.Errorf("failed to delete NetworkConfiguration: %w", err)
 	}
 

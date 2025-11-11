@@ -146,6 +146,20 @@ func (m *StorageManager) createSinglePVC(ctx context.Context, machine *vitistack
 		labels["disk-type"] = "boot"
 	}
 
+	// Get VolumeMode from environment variable
+	// Options: "Block" (default) or "Filesystem"
+	// Block mode provides raw block device access, which can be more performant
+	volumeModeStr := viper.GetString(consts.PVC_VOLUME_MODE)
+	var volumeMode corev1.PersistentVolumeMode
+	if volumeModeStr != "" {
+		volumeMode = corev1.PersistentVolumeMode(volumeModeStr)
+		logger.V(1).Info("Using configured VolumeMode", "volumeMode", volumeMode)
+	} else {
+		// Default to Block if not specified
+		volumeMode = corev1.PersistentVolumeBlock
+		logger.V(1).Info("Using default VolumeMode", "volumeMode", volumeMode)
+	}
+
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pvcName,
@@ -162,6 +176,7 @@ func (m *StorageManager) createSinglePVC(ctx context.Context, machine *vitistack
 				},
 			},
 			StorageClassName: &storageClass,
+			VolumeMode:       &volumeMode,
 		},
 	}
 
@@ -175,7 +190,7 @@ func (m *StorageManager) createSinglePVC(ctx context.Context, machine *vitistack
 		return err
 	}
 
-	logger.Info("Successfully created PVC", "pvc", pvc.Name, "size", storageSize, "storageClass", storageClass)
+	logger.Info("Successfully created PVC", "pvc", pvc.Name, "size", storageSize, "storageClass", storageClass, "volumeMode", volumeMode)
 	return nil
 }
 

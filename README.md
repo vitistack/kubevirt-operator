@@ -25,6 +25,47 @@ make docker-build-with-token
 
 Using https://kubebuilder.io and https://kubevirt.io/user-guide/
 
+## Configuration
+
+The operator can be configured using environment variables:
+
+### Storage Configuration
+
+- **`PVC_VOLUME_MODE`**: Set the volume mode for PersistentVolumeClaims (default: `Block`)
+
+  - `Block`: Raw block device access for better performance (default)
+  - `Filesystem`: Traditional filesystem access
+
+  Example:
+
+  ```bash
+  export PVC_VOLUME_MODE=Filesystem
+  ```
+
+### Virtual Machine Configuration
+
+- **`CPU_MODEL`**: CPU model for VMs (default: `host-model` for x86_64, `host-passthrough` for ARM)
+- **`VM_NAME_PREFIX`**: Prefix for VM names (default: `vm-`)
+
+### Network Configuration
+
+- **`CNI_VERSION`**: CNI version for NetworkAttachmentDefinitions (default: `1.0.0`)
+
+### Operator Configuration
+
+- **`MANAGED_BY`**: Label value for managed resources (default: `kubevirt-operator`)
+- **`KUBEVIRT_CONFIGS_NAMESPACE`**: Namespace where KubevirtConfig resources are stored
+- **`DEFAULT_KUBEVIRT_CONFIG`**: Name of the default KubevirtConfig to use
+
+### Logging Configuration
+
+- **`LOG_LEVEL`**: Logging level (default: `info`)
+- **`LOG_JSON`**: Enable JSON logging (default: `true`)
+- **`LOG_ADD_CALLER`**: Add caller information to logs
+- **`LOG_DISABLE_STACKTRACE`**: Disable stack traces
+- **`LOG_UNESCAPED_MULTILINE`**: Allow unescaped multiline logs
+- **`LOG_COLORIZE_LINE`**: Colorize log lines
+
 ## CI/CD
 
 This project uses GitHub Actions for continuous integration and delivery:

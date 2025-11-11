@@ -3,6 +3,7 @@ package consts
 const (
 	NAMESPACE                  = "default"
 	CPU_MODEL                  = "CPU_MODEL"
+	CNI_VERSION                = "CNI_VERSION"
 	LOG_LEVEL                  = "LOG_LEVEL"
 	LOG_JSON                   = "LOG_JSON"
 	LOG_ADD_CALLER             = "LOG_ADD_CALLER"
@@ -12,4 +13,6 @@ const (
 	MANAGED_BY                 = "MANAGED_BY"
 	KUBEVIRT_CONFIGS_NAMESPACE = "KUBEVIRT_CONFIGS_NAMESPACE"
 	DEFAULT_KUBEVIRT_CONFIG    = "DEFAULT_KUBEVIRT_CONFIG"
+	VM_NAME_PREFIX             = "VM_NAME_PREFIX"
+	PVC_VOLUME_MODE            = "PVC_VOLUME_MODE"
 )
