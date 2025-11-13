@@ -22,7 +22,7 @@ import (
 	"sync"
 
 	"github.com/spf13/viper"
-	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
+	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"

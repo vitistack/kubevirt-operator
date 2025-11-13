@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"strings"
 
-	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
+	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubevirtv1 "kubevirt.io/api/core/v1"

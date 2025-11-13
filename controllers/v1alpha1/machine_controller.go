@@ -30,7 +30,7 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
-	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
+	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/internal/consts"
 	"github.com/vitistack/kubevirt-operator/internal/machine/events"
 	"github.com/vitistack/kubevirt-operator/internal/machine/network"

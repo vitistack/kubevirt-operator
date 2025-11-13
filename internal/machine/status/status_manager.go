@@ -24,7 +24,7 @@ import (
 
 	"net"
 
-	vitistackv1alpha1 "github.com/vitistack/crds/pkg/v1alpha1"
+	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/internal/machine/events"
 	"github.com/vitistack/kubevirt-operator/pkg/consts"
 	corev1 "k8s.io/api/core/v1"

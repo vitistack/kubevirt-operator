@@ -1,6 +1,6 @@
 # KubeVirt Operator - Updated for CRD v0.0.1-alpha05
 
-This operator has been updated to work with the external CRD package `github.com/vitistack/crds v0.0.1-alpha05`.
+This operator has been updated to work with the external CRD package `github.com/vitistack/common`.
 
 ## Key Changes
 
@@ -79,6 +79,6 @@ go run ./cmd/main.go
 
 ## Dependencies
 
-- External CRD: `github.com/vitistack/crds v0.0.1-alpha05`
+- External CRD: `github.com/vitistack/common`
 - KubeVirt API: `kubevirt.io/api/core/v1`
 - Controller Runtime: `sigs.k8s.io/controller-runtime`

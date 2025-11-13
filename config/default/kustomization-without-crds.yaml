@@ -1,5 +1,5 @@
 # Alternative kustomization for environments where CRDs are managed externally
-# Use this when CRDs are already installed from github.com/vitistack/crds
+# Use this when CRDs are already installed from github.com/vitistack/common
 
 # Adds namespace to all resources.
 namespace: kubevirt-operator-system
