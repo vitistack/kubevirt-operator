@@ -192,7 +192,7 @@ func (m *KubevirtClientManager) ValidateConnection(ctx context.Context, kubevirt
 // 2. If DEFAULT_KUBEVIRT_CONFIG env var is set, use that config
 // 3. If exactly ONE KubevirtConfig exists, automatically use it
 // 4. If MULTIPLE KubevirtConfigs exist without explicit reference:
-//   - Search all clusters for the VirtualMachine (vm-<machine-name>)
+//   - Search all clusters for the VirtualMachine (<machine-name>)
 //   - If found, use that cluster and set annotation
 //   - If not found in any cluster, return error (ambiguous placement)
 //
@@ -254,7 +254,7 @@ func (m *KubevirtClientManager) GetOrCreateClientFromMachine(ctx context.Context
 // findVMInClusters searches for a VirtualMachine across all available clusters
 // Returns the config name where the VM was found, or empty string if not found
 func (m *KubevirtClientManager) findVMInClusters(ctx context.Context, machine *vitistackv1alpha1.Machine, configs []vitistackv1alpha1.KubevirtConfig) string {
-	vmName := fmt.Sprintf("vm-%s", machine.Name)
+	vmName := fmt.Sprintf("%s", machine.Name)
 
 	for i := range configs {
 		config := &configs[i]

@@ -142,7 +142,18 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
-	return r.StatusManager.UpdateMachineStatusFromVMAndVMI(ctx, machine, virtualmachine, vmi, vmiExists, remoteClient)
+	// Update status from VM/VMI state - this ensures other operators get current info
+	result, err = r.StatusManager.UpdateMachineStatusFromVMAndVMI(ctx, machine, virtualmachine, vmi, vmiExists, remoteClient)
+	if err != nil {
+		logger.Error(err, "Failed to update Machine status from VM/VMI")
+	}
+
+	// Always requeue after 1 minute to keep status fresh for dependent operators
+	if result.RequeueAfter == 0 && !result.Requeue {
+		result.RequeueAfter = 15 * time.Second
+	}
+
+	return result, err
 }
 
 // ensureNamespaceExists creates the namespace on the remote cluster if it doesn't exist
@@ -337,7 +348,7 @@ func (r *MachineReconciler) cleanupRemoteResources(ctx context.Context, machine 
 	logger := log.FromContext(ctx)
 
 	r.VMManager.SetRemoteClient(remoteClient)
-	vmName := fmt.Sprintf("vm-%s", machine.Name)
+	vmName := fmt.Sprintf("%s", machine.Name)
 	vmNamespacedName := types.NamespacedName{
 		Name:      vmName,
 		Namespace: machine.Namespace,
@@ -510,7 +521,7 @@ func (r *MachineReconciler) getProviderName(machine *vitistackv1alpha1.Machine) 
 		return ""
 	}
 	// ProviderConfig is a value type (CloudProviderConfig); zero value has empty Name
-	return strings.TrimSpace(machine.Spec.ProviderConfig.Name)
+	return strings.TrimSpace(machine.Spec.Provider)
 }
 
 // NewMachineReconciler creates a new MachineReconciler with initialized managers

@@ -104,12 +104,17 @@ func (m *StatusManager) UpdateMachineStatusWithDetails(ctx context.Context, mach
 // UpdateMachineStatusFromVMAndVMI determines and updates machine status based on VM and VMI state
 func (m *StatusManager) UpdateMachineStatusFromVMAndVMI(ctx context.Context, machine *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine, vmi *kubevirtv1.VirtualMachineInstance, vmiExists bool, remoteClient client.Client) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
+
+	// First evaluate state/phase and populate all status fields (including IPs, disks, etc.)
+	// This modifies machine.Status in-place
 	state, phase, requeue := m.evaluateState(machine, vm, vmi, vmiExists, ctx, remoteClient)
 
+	// Now set the basic state fields
 	machine.Status.Phase = phase
 	machine.Status.State = state
 	machine.Status.Provider = "kubevirt"
 
+	// Finally, write the complete status to the cluster
 	if err := m.UpdateMachineStatus(ctx, machine, state); err != nil {
 		logger.Error(err, "Failed to update Machine status")
 		return ctrl.Result{}, err
@@ -327,14 +332,27 @@ func (m *StatusManager) updateStatusFromPodVMVMIStatus(ctx context.Context, mach
 func extractNetworkInterfacesFromVMI(vmi *kubevirtv1.VirtualMachineInstance, networkInterfaces []vitistackv1alpha1.NetworkInterfaceStatus) []vitistackv1alpha1.NetworkInterfaceStatus {
 	for i := range vmi.Status.Interfaces {
 		networkInterface := &vmi.Status.Interfaces[i]
-		ipv4Addresses := []string{}
+
+		// Filter out invalid MACs
+		if networkInterface.MAC == "" || networkInterface.MAC == "00:00:00:00:00:00" {
+			continue
+		}
+
+		// Skip interfaces with no IPs
+		if len(networkInterface.IPs) == 0 {
+			continue
+		}
+
+		// Collect all IP addresses (both IPv4 and IPv6) in IPAddresses
+		allIPAddresses := []string{}
 		ipv6Addresses := []string{}
+
 		for j := range networkInterface.IPs {
 			ip := networkInterface.IPs[j]
 			if parsedIP := net.ParseIP(ip); parsedIP != nil {
-				if parsedIP.To4() != nil {
-					ipv4Addresses = append(ipv4Addresses, ip)
-				} else {
+				allIPAddresses = append(allIPAddresses, ip)
+				// Keep IPv6 list for backward compatibility
+				if parsedIP.To4() == nil {
 					ipv6Addresses = append(ipv6Addresses, ip)
 				}
 			} else {
@@ -342,18 +360,10 @@ func extractNetworkInterfacesFromVMI(vmi *kubevirtv1.VirtualMachineInstance, net
 			}
 		}
 
-		if networkInterface.MAC == "" || networkInterface.MAC == "00:00:00:00:00:00" {
-			continue
-		}
-
-		if len(ipv4Addresses) == 0 && len(ipv6Addresses) == 0 {
-			continue
-		}
-
 		networkInterfaces = append(networkInterfaces, vitistackv1alpha1.NetworkInterfaceStatus{
 			Name:          networkInterface.Name,
 			MACAddress:    networkInterface.MAC,
-			IPAddresses:   ipv4Addresses,
+			IPAddresses:   allIPAddresses,
 			IPv6Addresses: ipv6Addresses,
 			State:         networkInterface.LinkState,
 			Type:          networkInterface.InfoSource,

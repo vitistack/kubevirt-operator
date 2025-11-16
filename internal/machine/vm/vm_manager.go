@@ -327,42 +327,41 @@ func (m *VMManager) buildDisksAndVolumes(machine *vitistackv1alpha1.Machine, pvc
 
 // generateShortNetworkConfigName generates a shortened name for NetworkConfiguration spec.name field
 // to comply with the 32-byte limit. Follows patterns:
-// - vm-<cluster>-wp<number> for workers (e.g., simple-cluster-worker-default-worker-pool-0 -> vm-simple-cluster-wp0)
-// - vm-<cluster>-cp<number> for control planes (e.g., simple-cluster-control-plane-0 -> vm-simple-cluster-cp0)
+// - <cluster>-wrk<number> for workers (e.g., simple-cluster-worker-default-worker-pool-0 -> simple-cluster-wrk0)
+// - <cluster>-ctp<number> for control planes (e.g., simple-cluster-control-plane-0 -> simple-cluster-ctp0)
 func generateShortNetworkConfigName(machineName string) string {
 	// Pattern 1: <cluster>-worker-default-worker-pool-<number> or <cluster>-worker-<pool>-pool-<number>
-	// Extract cluster name and number, convert to vm-<cluster>-wp<number>
+	// Extract cluster name and number, convert to <cluster>-wp<number>
 	workerPattern := regexp.MustCompile(`^(.+?)-worker(?:-default)?(?:-worker)?-pool-(\d+)$`)
 	if matches := workerPattern.FindStringSubmatch(machineName); matches != nil {
 		clusterName := matches[1]
 		poolNumber := matches[2]
-		shortName := fmt.Sprintf("vm-%s-wp%s", clusterName, poolNumber)
+		shortName := fmt.Sprintf("%s-wrk%s", clusterName, poolNumber)
 		if len(shortName) <= 32 {
 			return shortName
 		}
 	}
 
 	// Pattern 2: <cluster>-control-plane-<number>
-	// Convert to vm-<cluster>-cp<number>
+	// Convert to <cluster>-cp<number>
 	controlPlanePattern := regexp.MustCompile(`^(.+?)-control-plane-(\d+)$`)
 	if matches := controlPlanePattern.FindStringSubmatch(machineName); matches != nil {
 		clusterName := matches[1]
 		number := matches[2]
-		shortName := fmt.Sprintf("vm-%s-cp%s", clusterName, number)
+		shortName := fmt.Sprintf("%s-ctp%s", clusterName, number)
 		if len(shortName) <= 32 {
 			return shortName
 		}
 	}
 
 	// Fallback: If patterns don't match or result is still too long,
-	// use vm- prefix and truncate/hash the name
-	shortName := "vm-" + machineName
+	shortName := machineName
 	if len(shortName) <= 32 {
 		return shortName
 	}
 
-	// Truncate to 32 bytes (keep vm- prefix and take first 29 chars of machine name)
-	return "vm-" + machineName[:29]
+	// Truncate to 32 bytes
+	return "" + machineName[:32]
 }
 
 // persistMacAddressesToNetworkConfiguration creates or updates a NetworkConfiguration CRD with the MAC address
