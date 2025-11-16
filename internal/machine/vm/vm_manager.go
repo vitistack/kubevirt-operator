@@ -19,6 +19,7 @@ package vm
 import (
 	"context"
 	"fmt"
+	"regexp"
 
 	"github.com/spf13/viper"
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
@@ -324,6 +325,46 @@ func (m *VMManager) buildDisksAndVolumes(machine *vitistackv1alpha1.Machine, pvc
 	return disks, volumes
 }
 
+// generateShortNetworkConfigName generates a shortened name for NetworkConfiguration spec.name field
+// to comply with the 32-byte limit. Follows patterns:
+// - vm-<cluster>-wp<number> for workers (e.g., simple-cluster-worker-default-worker-pool-0 -> vm-simple-cluster-wp0)
+// - vm-<cluster>-cp<number> for control planes (e.g., simple-cluster-control-plane-0 -> vm-simple-cluster-cp0)
+func generateShortNetworkConfigName(machineName string) string {
+	// Pattern 1: <cluster>-worker-default-worker-pool-<number> or <cluster>-worker-<pool>-pool-<number>
+	// Extract cluster name and number, convert to vm-<cluster>-wp<number>
+	workerPattern := regexp.MustCompile(`^(.+?)-worker(?:-default)?(?:-worker)?-pool-(\d+)$`)
+	if matches := workerPattern.FindStringSubmatch(machineName); matches != nil {
+		clusterName := matches[1]
+		poolNumber := matches[2]
+		shortName := fmt.Sprintf("vm-%s-wp%s", clusterName, poolNumber)
+		if len(shortName) <= 32 {
+			return shortName
+		}
+	}
+
+	// Pattern 2: <cluster>-control-plane-<number>
+	// Convert to vm-<cluster>-cp<number>
+	controlPlanePattern := regexp.MustCompile(`^(.+?)-control-plane-(\d+)$`)
+	if matches := controlPlanePattern.FindStringSubmatch(machineName); matches != nil {
+		clusterName := matches[1]
+		number := matches[2]
+		shortName := fmt.Sprintf("vm-%s-cp%s", clusterName, number)
+		if len(shortName) <= 32 {
+			return shortName
+		}
+	}
+
+	// Fallback: If patterns don't match or result is still too long,
+	// use vm- prefix and truncate/hash the name
+	shortName := "vm-" + machineName
+	if len(shortName) <= 32 {
+		return shortName
+	}
+
+	// Truncate to 32 bytes (keep vm- prefix and take first 29 chars of machine name)
+	return "vm-" + machineName[:29]
+}
+
 // persistMacAddressesToNetworkConfiguration creates or updates a NetworkConfiguration CRD with the MAC address
 func (m *VMManager) persistMacAddressesToNetworkConfiguration(ctx context.Context, machine *vitistackv1alpha1.Machine, macAddress, networkName string) error {
 	logger := log.FromContext(ctx)
@@ -344,6 +385,8 @@ func (m *VMManager) persistMacAddressesToNetworkConfiguration(ctx context.Contex
 		}
 
 		// NetworkConfiguration doesn't exist, create a new one
+		// Generate a shortened name for spec.name to comply with 32-byte limit
+		shortName := generateShortNetworkConfigName(machine.Name)
 		netConfig := &vitistackv1alpha1.NetworkConfiguration{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      machine.Name,
@@ -354,7 +397,7 @@ func (m *VMManager) persistMacAddressesToNetworkConfiguration(ctx context.Contex
 				},
 			},
 			Spec: vitistackv1alpha1.NetworkConfigurationSpec{
-				Name:        machine.Name,
+				Name:        shortName,
 				Description: "Network configuration for machine " + machine.Name,
 				NetworkInterfaces: []vitistackv1alpha1.NetworkConfigurationInterface{
 					networkInterface,
