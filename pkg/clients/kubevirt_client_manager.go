@@ -254,7 +254,7 @@ func (m *KubevirtClientManager) GetOrCreateClientFromMachine(ctx context.Context
 // findVMInClusters searches for a VirtualMachine across all available clusters
 // Returns the config name where the VM was found, or empty string if not found
 func (m *KubevirtClientManager) findVMInClusters(ctx context.Context, machine *vitistackv1alpha1.Machine, configs []vitistackv1alpha1.KubevirtConfig) string {
-	vmName := fmt.Sprintf("%s", machine.Name)
+	vmName := machine.Name
 
 	for i := range configs {
 		config := &configs[i]
@@ -280,23 +280,6 @@ func (m *KubevirtClientManager) findVMInClusters(ctx context.Context, machine *v
 
 	// VM not found in any cluster
 	return ""
-}
-
-// CreateClientFromKubeconfig creates a client directly from kubeconfig data (for testing)
-func CreateClientFromKubeconfig(kubeconfigData []byte, scheme *runtime.Scheme) (client.Client, error) {
-	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create REST config from kubeconfig: %w", err)
-	}
-
-	remoteClient, err := client.New(restConfig, client.Options{
-		Scheme: scheme,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Kubernetes client: %w", err)
-	}
-
-	return remoteClient, nil
 }
 
 // HealthCheck performs a health check on all cached clients

@@ -268,7 +268,7 @@ func (r *MachineReconciler) fetchAndInitMachine(ctx context.Context, req ctrl.Re
 func (r *MachineReconciler) ensureVirtualMachine(ctx context.Context, machine *vitistackv1alpha1.Machine, remoteClient client.Client) (*kubevirtv1.VirtualMachine, string, ctrl.Result, bool, error) {
 	logger := log.FromContext(ctx)
 	virtualmachine := &kubevirtv1.VirtualMachine{}
-	vmName := fmt.Sprintf("%s%s", viper.GetString(consts.VM_NAME_PREFIX), machine.Name)
+	vmName := machine.Name
 	vmKey := types.NamespacedName{Name: vmName, Namespace: machine.Namespace}
 
 	// Get VM from remote KubeVirt cluster
@@ -348,7 +348,7 @@ func (r *MachineReconciler) cleanupRemoteResources(ctx context.Context, machine 
 	logger := log.FromContext(ctx)
 
 	r.VMManager.SetRemoteClient(remoteClient)
-	vmName := fmt.Sprintf("%s", machine.Name)
+	vmName := machine.Name
 	vmNamespacedName := types.NamespacedName{
 		Name:      vmName,
 		Namespace: machine.Namespace,
