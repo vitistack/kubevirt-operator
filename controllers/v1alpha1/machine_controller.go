@@ -148,8 +148,8 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		logger.Error(err, "Failed to update Machine status from VM/VMI")
 	}
 
-	// Always requeue after 1 minute to keep status fresh for dependent operators
-	if result.RequeueAfter == 0 && !result.Requeue {
+	// Always requeue after 15 seconds to keep status fresh for dependent operators
+	if result.RequeueAfter == 0 {
 		result.RequeueAfter = 15 * time.Second
 	}
 
