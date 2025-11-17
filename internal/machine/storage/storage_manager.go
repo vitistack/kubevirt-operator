@@ -100,13 +100,14 @@ func (m *StorageManager) CreatePVCsFromDiskSpecs(ctx context.Context, machine *v
 	for i := range machine.Spec.Disks {
 		disk := &machine.Spec.Disks[i]
 		var pvcName string
-		if disk.Boot {
+		switch {
+		case disk.Boot:
 			// Boot disk uses just the machine name
 			pvcName = vmName
-		} else if disk.Name != "" {
+		case disk.Name != "":
 			// Non-boot disks with names use vmName-diskname
 			pvcName = fmt.Sprintf("%s-%s", vmName, disk.Name)
-		} else {
+		default:
 			// Non-boot disks without names use vmName-disk{index}
 			pvcName = fmt.Sprintf("%s-disk%d", vmName, i)
 		}
