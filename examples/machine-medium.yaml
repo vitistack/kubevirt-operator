@@ -6,3 +6,4 @@ metadata:
 spec:
   instanceType: "medium"
   name: "example-vm-medium"
+  provider: kubevirt

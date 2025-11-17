@@ -6,7 +6,7 @@ metadata:
 spec:
   instanceType: "medium"
   name: "example-vm-medium-with-overrides"
-
+  provider: kubevirt
   memory: 3221225472 # 3 GB in bytes
   cpu:
     cores: 3

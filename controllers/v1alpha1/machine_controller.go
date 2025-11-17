@@ -243,6 +243,9 @@ func (r *MachineReconciler) fetchAndInitMachine(ctx context.Context, req ctrl.Re
 	}
 
 	if machine.GetDeletionTimestamp() != nil {
+		logger.Info("Machine has deletion timestamp, entering deletion flow",
+			"machine", machine.Name,
+			"deletionTimestamp", machine.GetDeletionTimestamp())
 		result, err := r.handleDeletion(ctx, machine)
 		return machine, result, true, err
 	}
@@ -312,22 +315,37 @@ func (r *MachineReconciler) getVMI(ctx context.Context, vmName, namespace string
 func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitistackv1alpha1.Machine) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	logger.Info("=== MACHINE DELETION STARTED ===",
+		"machine", machine.Name,
+		"namespace", machine.Namespace,
+		"hasFinalizer", controllerutil.ContainsFinalizer(machine, MachineFinalizer))
+
 	if !controllerutil.ContainsFinalizer(machine, MachineFinalizer) {
+		logger.Info("No finalizer present, skipping cleanup")
 		return ctrl.Result{}, nil
 	}
 
+	logger.Info("Getting remote KubeVirt client for cleanup")
 	// Get the remote KubeVirt client for cleanup operations
 	remoteClient, _, _, err := r.KubevirtClientMgr.GetOrCreateClientFromMachine(ctx, machine)
 	if err != nil {
-		logger.Error(err, "Failed to get KubeVirt client for deletion, skipping VM cleanup")
-		// Continue with cleanup of local resources even if remote client fails
-	} else {
-		// Cleanup resources on remote cluster
-		result, err := r.cleanupRemoteResources(ctx, machine, remoteClient)
-		if err != nil || result.RequeueAfter > 0 {
-			return result, err
-		}
+		logger.Error(err, "Failed to get KubeVirt client for deletion")
+		// Cannot proceed without remote client - PVCs and VM are on remote cluster
+		// Requeue to retry the deletion
+		return ctrl.Result{RequeueAfter: time.Minute}, err
 	}
+
+	logger.Info("Remote client obtained, starting cleanup of remote resources")
+	// Cleanup resources on remote cluster
+	result, err := r.cleanupRemoteResources(ctx, machine, remoteClient)
+	if err != nil || result.RequeueAfter > 0 {
+		logger.Info("Remote cleanup needs retry or returned error",
+			"error", err,
+			"requeue", result.RequeueAfter > 0)
+		return result, err
+	}
+
+	logger.Info("Remote cleanup completed, cleaning up network configuration")
 
 	// Cleanup network configuration from supervisor cluster
 	if err := r.VMManager.CleanupNetworkConfiguration(ctx, machine); err != nil {
@@ -347,6 +365,10 @@ func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitista
 func (r *MachineReconciler) cleanupRemoteResources(ctx context.Context, machine *vitistackv1alpha1.Machine, remoteClient client.Client) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	logger.Info("=== STARTING CLEANUP OF REMOTE RESOURCES ===",
+		"machine", machine.Name,
+		"namespace", machine.Namespace)
+
 	r.VMManager.SetRemoteClient(remoteClient)
 	vmName := machine.Name
 	vmNamespacedName := types.NamespacedName{
@@ -360,59 +382,81 @@ func (r *MachineReconciler) cleanupRemoteResources(ctx context.Context, machine 
 		nadName = machine.Annotations["vitistack.io/nad-to-cleanup"]
 	}
 
-	// If no NAD name stored yet, try to get and delete the VirtualMachine
-	if nadName == "" {
-		var err error
-		nadName, err = r.deleteVirtualMachine(ctx, vmNamespacedName, remoteClient)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
+	logger.Info("NAD annotation check", "nadName", nadName, "hasAnnotation", nadName != "")
 
-		// Store NAD name in annotation if found, so we don't lose it on requeue
-		if nadName != "" {
-			if machine.Annotations == nil {
-				machine.Annotations = make(map[string]string)
-			}
-			machine.Annotations["vitistack.io/nad-to-cleanup"] = nadName
-			if err := r.Update(ctx, machine); err != nil {
-				logger.Error(err, "Failed to store NAD name in machine annotations")
-				// Continue anyway, we'll try again
+	// If we don't have a NAD name yet, try to extract it from the VM before deletion
+	if nadName == "" {
+		logger.Info("No NAD name in annotations, trying to extract from VM")
+		virtualMachine := &kubevirtv1.VirtualMachine{}
+		if err := remoteClient.Get(ctx, vmNamespacedName, virtualMachine); err == nil {
+			nadName = r.extractNADNameFromVM(virtualMachine)
+			if nadName != "" {
+				logger.Info("Extracted NAD name from VM", "nadName", nadName)
+				// Store it for future reconciles
+				if machine.Annotations == nil {
+					machine.Annotations = make(map[string]string)
+				}
+				machine.Annotations["vitistack.io/nad-to-cleanup"] = nadName
+				if err := r.Update(ctx, machine); err != nil {
+					logger.Error(err, "Failed to store NAD name in annotations")
+				}
 			}
 		}
 	}
 
-	// Wait for VM to be fully removed
+	// STEP 1: Delete PVCs FIRST (before VM deletion)
+	logger.Info("=== STEP 1: DELETING PVCs ===",
+		"machine", machine.Name,
+		"namespace", machine.Namespace,
+		"vmName", vmName)
+
+	if err := r.StorageManager.DeleteAssociatedPVCs(ctx, machine, vmName, remoteClient); err != nil {
+		logger.Error(err, "Failed to delete associated PVCs")
+		return ctrl.Result{}, err
+	}
+	logger.Info("=== PVC DELETION COMPLETED ===")
+
+	// Attempt to delete NAD proactively if no other VMs (besides this one) are using it
+	if nadName != "" {
+		logger.Info("Checking if NAD can be removed before VM deletion", "nadName", nadName)
+		if err := r.NetworkManager.CleanupNADIfUnusedByOtherVMs(ctx, nadName, machine.Namespace, vmName, remoteClient); err != nil {
+			logger.Error(err, "Failed to perform pre-VM NAD cleanup")
+		}
+	}
+
+	// STEP 2: Delete the VirtualMachine
+	logger.Info("=== STEP 2: DELETING VIRTUALMACHINE ===", "vm", vmName, "namespace", machine.Namespace)
+	_, err := r.deleteVirtualMachine(ctx, vmNamespacedName, remoteClient)
+	if err != nil {
+		logger.Error(err, "Failed to delete VirtualMachine")
+		return ctrl.Result{}, err
+	}
+
+	// STEP 3: Wait for VM to be fully removed
+	logger.Info("=== STEP 3: CHECKING IF VM STILL EXISTS ===", "vm", vmName, "namespace", machine.Namespace)
 	vmExists := true
 	checkVM := &kubevirtv1.VirtualMachine{}
 	if err := remoteClient.Get(ctx, vmNamespacedName, checkVM); err != nil {
 		if errors.IsNotFound(err) {
 			vmExists = false
+			logger.Info("VirtualMachine not found (fully deleted)", "vm", vmName)
 		} else {
 			logger.Error(err, "Failed to verify VirtualMachine deletion")
 			return ctrl.Result{}, err
 		}
+	} else {
+		logger.Info("VirtualMachine still exists", "vm", vmName)
 	}
 
+	// If VM still exists, requeue to wait for it
 	if vmExists {
-		// VM still exists, requeue to wait for deletion to complete
-		logger.Info("VirtualMachine deletion in progress, requeuing to complete cleanup",
-			"virtualmachine", vmNamespacedName.Name,
-			"nadName", nadName)
+		logger.Info("VM still exists - requeuing (PVCs cleaned up, will retry for NAD)",
+			"virtualmachine", vmNamespacedName.Name)
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// VM is fully deleted, proceed with cleanup
-	logger.Info("VirtualMachine fully deleted, proceeding with resource cleanup",
-		"virtualmachine", vmNamespacedName.Name,
-		"nadName", nadName)
-
-	// Delete all associated PVCs from the remote cluster
-	if err := r.StorageManager.DeleteAssociatedPVCs(ctx, machine, vmName, remoteClient); err != nil {
-		logger.Error(err, "Failed to delete associated PVCs")
-		return ctrl.Result{}, err
-	}
-
-	// Cleanup NetworkAttachmentDefinition if no other VMs are using it
+	// STEP 4: Delete NADs now that the VM is gone
+	logger.Info("=== STEP 4: CLEANING UP NADs ===", "nadName", nadName)
 	if nadName != "" {
 		if err := r.NetworkManager.CleanupNetworkAttachmentDefinition(ctx, nadName, machine.Namespace, remoteClient); err != nil {
 			logger.Error(err, "Failed to cleanup NetworkAttachmentDefinition",
@@ -420,8 +464,18 @@ func (r *MachineReconciler) cleanupRemoteResources(ctx context.Context, machine 
 				"namespace", machine.Namespace)
 			// Don't return error, continue with other cleanup
 		}
+	} else {
+		logger.Info("No NAD name found, skipping specific NAD cleanup")
+	}
 
-		// Remove the NAD annotation now that we're done
+	logger.Info("Running orphaned NAD cleanup", "namespace", machine.Namespace)
+	if err := r.NetworkManager.CleanupOrphanedNADs(ctx, machine.Namespace, remoteClient); err != nil {
+		logger.Error(err, "Failed to cleanup orphaned NADs", "namespace", machine.Namespace)
+		// Don't return error, continue with other cleanup
+	}
+
+	// Clean up the NAD annotation now that everything is done
+	if nadName != "" && machine.Annotations != nil {
 		delete(machine.Annotations, "vitistack.io/nad-to-cleanup")
 		if err := r.Update(ctx, machine); err != nil {
 			logger.Error(err, "Failed to remove NAD annotation")
@@ -429,6 +483,7 @@ func (r *MachineReconciler) cleanupRemoteResources(ctx context.Context, machine 
 		}
 	}
 
+	logger.Info("=== CLEANUP COMPLETED SUCCESSFULLY ===")
 	return ctrl.Result{}, nil
 }
 
@@ -440,6 +495,7 @@ func (r *MachineReconciler) deleteVirtualMachine(ctx context.Context, vmNamespac
 	err := remoteClient.Get(ctx, vmNamespacedName, virtualMachine)
 	if err != nil {
 		if errors.IsNotFound(err) {
+			logger.Info("VirtualMachine not found, nothing to delete")
 			return "", nil
 		}
 		logger.Error(err, "Failed to get VirtualMachine for deletion from remote cluster")
@@ -449,12 +505,34 @@ func (r *MachineReconciler) deleteVirtualMachine(ctx context.Context, vmNamespac
 	// Extract NAD name from VM networks before deletion
 	nadName := r.extractNADNameFromVM(virtualMachine)
 
+	logger.Info("Found VirtualMachine, preparing for deletion",
+		"vm", virtualMachine.Name,
+		"running", virtualMachine.Spec.Running,
+		"runStrategy", virtualMachine.Spec.RunStrategy)
+
+	// Stop the VM if it's running
+	if virtualMachine.Spec.Running != nil && *virtualMachine.Spec.Running {
+		logger.Info("VM is running, stopping it first")
+		running := false
+		virtualMachine.Spec.Running = &running
+		if err := remoteClient.Update(ctx, virtualMachine); err != nil {
+			logger.Error(err, "Failed to stop VirtualMachine")
+			return nadName, err
+		}
+		logger.Info("VM stop initiated")
+	}
+
 	// VirtualMachine exists, delete it from remote cluster
+	logger.Info("Deleting VirtualMachine from remote cluster", "vm", virtualMachine.Name)
 	if err := remoteClient.Delete(ctx, virtualMachine); err != nil {
+		if errors.IsNotFound(err) {
+			logger.Info("VirtualMachine already deleted")
+			return nadName, nil
+		}
 		logger.Error(err, "Failed to delete VirtualMachine from remote cluster")
 		return "", err
 	}
-	logger.Info("Deleted VirtualMachine from remote cluster", "virtualmachine", virtualMachine.Name)
+	logger.Info("VirtualMachine deletion request sent successfully", "virtualmachine", virtualMachine.Name)
 
 	return nadName, nil
 }

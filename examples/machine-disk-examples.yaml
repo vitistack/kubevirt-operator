@@ -8,6 +8,7 @@ metadata:
 spec:
   instanceType: "small"
   name: "simple-vm"
+  provider: kubevirt
 
 ---
 # Example 2: Machine with single custom root disk
@@ -19,6 +20,7 @@ metadata:
 spec:
   instanceType: "medium"
   name: "single-disk-vm"
+  provider: kubevirt
   disks:
     - name: "root"
       sizeGB: 30
@@ -33,6 +35,7 @@ metadata:
   name: multi-disk-machine
   namespace: default
 spec:
+  provider: kubevirt
   instanceType: "large"
   name: "multi-disk-vm"
   memory: 8589934592 # 8GB in bytes

@@ -6,3 +6,4 @@ metadata:
 spec:
   instanceType: "large"
   name: "example-vm-large"
+  provider: kubevirt

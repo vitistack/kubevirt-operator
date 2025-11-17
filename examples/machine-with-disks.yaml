@@ -7,6 +7,7 @@ metadata:
 spec:
   instanceType: "medium"
   name: "example-vm-with-disks"
+  provider: kubevirt
   disks:
     - name: "root"
       sizeGB: 20

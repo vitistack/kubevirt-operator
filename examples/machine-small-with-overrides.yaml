@@ -6,6 +6,7 @@ metadata:
 spec:
   # Using predefined small machine type
   instanceType: "small"
+  provider: kubevirt
   # No resource overrides - will use defaults (1 GB RAM, 1 CPU)
   name: "example-vm-small"
   cpu:

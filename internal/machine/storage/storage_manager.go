@@ -88,7 +88,7 @@ func (m *StorageManager) CreatePVCsFromDiskSpecs(ctx context.Context, machine *v
 
 	// If no disks are specified in the spec, create a default root disk
 	if len(machine.Spec.Disks) == 0 {
-		pvcName := fmt.Sprintf("%s-root-pvc", vmName)
+		pvcName := vmName
 		if err := m.createSinglePVC(ctx, machine, pvcName, "10Gi", defaultStorageClass, true, remoteClient); err != nil {
 			return nil, fmt.Errorf("failed to create default root PVC: %w", err)
 		}
@@ -100,10 +100,15 @@ func (m *StorageManager) CreatePVCsFromDiskSpecs(ctx context.Context, machine *v
 	for i := range machine.Spec.Disks {
 		disk := &machine.Spec.Disks[i]
 		var pvcName string
-		if disk.Name != "" {
-			pvcName = fmt.Sprintf("%s-%s-pvc", vmName, disk.Name)
+		if disk.Boot {
+			// Boot disk uses just the machine name
+			pvcName = vmName
+		} else if disk.Name != "" {
+			// Non-boot disks with names use vmName-diskname
+			pvcName = fmt.Sprintf("%s-%s", vmName, disk.Name)
 		} else {
-			pvcName = fmt.Sprintf("%s-disk%d-pvc", vmName, i)
+			// Non-boot disks without names use vmName-disk{index}
+			pvcName = fmt.Sprintf("%s-disk%d", vmName, i)
 		}
 
 		// Convert sizeGB to storage size string
@@ -198,6 +203,11 @@ func (m *StorageManager) createSinglePVC(ctx context.Context, machine *vitistack
 func (m *StorageManager) DeleteAssociatedPVCs(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string, remoteClient client.Client) error {
 	logger := log.FromContext(ctx)
 
+	logger.Info("Starting PVC cleanup for machine",
+		"machine", machine.Name,
+		"namespace", machine.Namespace,
+		"vmName", vmName)
+
 	// List all PVCs in the namespace with the machine's label from the remote cluster
 	pvcList := &corev1.PersistentVolumeClaimList{}
 	listOpts := []client.ListOption{
@@ -213,36 +223,30 @@ func (m *StorageManager) DeleteAssociatedPVCs(ctx context.Context, machine *viti
 		return err
 	}
 
+	logger.Info("Found PVCs to delete",
+		"count", len(pvcList.Items),
+		"namespace", machine.Namespace,
+		"managed-by", viper.GetString(consts.MANAGED_BY),
+		"source-machine", machine.Name)
+
 	// Delete each PVC (index loop to avoid copying large structs each iteration)
 	for i := range pvcList.Items {
 		pvc := &pvcList.Items[i]
+		logger.Info("Deleting PVC from remote cluster",
+			"pvc", pvc.Name,
+			"namespace", pvc.Namespace)
+		
 		if err := remoteClient.Delete(ctx, pvc); err != nil {
+			if errors.IsNotFound(err) {
+				logger.Info("PVC already deleted", "pvc", pvc.Name)
+				continue
+			}
 			logger.Error(err, "Failed to delete PVC", "pvc", pvc.Name)
 			return err
 		}
-		logger.Info("Deleted PVC", "pvc", pvc.Name)
+		logger.Info("Successfully deleted PVC from remote cluster", "pvc", pvc.Name)
 	}
 
-	// Also try to delete any legacy PVCs with the old naming convention
-	legacyPVCName := fmt.Sprintf("%s-pvc", vmName)
-	legacyPVC := &corev1.PersistentVolumeClaim{}
-	legacyPVCNamespacedName := types.NamespacedName{
-		Name:      legacyPVCName,
-		Namespace: machine.Namespace,
-	}
-
-	err := remoteClient.Get(ctx, legacyPVCNamespacedName, legacyPVC)
-	if err == nil {
-		// Legacy PVC exists, delete it
-		if err := remoteClient.Delete(ctx, legacyPVC); err != nil {
-			logger.Error(err, "Failed to delete legacy PVC")
-			return err
-		}
-		logger.Info("Deleted legacy PVC", "pvc", legacyPVC.Name)
-	} else if !errors.IsNotFound(err) {
-		logger.Error(err, "Failed to get legacy PVC for deletion")
-		return err
-	}
-
+	logger.Info("PVC cleanup completed successfully for machine", "machine", machine.Name)
 	return nil
 }

@@ -17,6 +17,7 @@ metadata:
   name: test-machine
   namespace: my-custom-namespace # This namespace will be created on the remote KubeVirt cluster
 spec:
+  provider: kubevirt
   instanceType: small
   cpu:
     cores: 2

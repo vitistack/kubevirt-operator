@@ -8,3 +8,4 @@ spec:
   instanceType: "small"
   # No resource overrides - will use defaults (1 GB RAM, 1 CPU)
   name: "example-vm-small"
+  provider: kubevirt
