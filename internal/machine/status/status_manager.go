@@ -84,7 +84,6 @@ func (m *StatusManager) UpdateMachineStatusWithDetails(ctx context.Context, mach
 		// Attempt to update the status
 		if err := m.Status().Update(ctx, latestMachine); err != nil {
 			if errors.IsConflict(err) && i < maxRetries-1 {
-				logger.Info("Resource conflict during status update, retrying", "attempt", i+1)
 				// Brief delay before retry
 				time.Sleep(time.Millisecond * 100)
 				continue
@@ -137,10 +136,6 @@ func (m *StatusManager) evaluateState(machine *vitistackv1alpha1.Machine, vm *ku
 		}
 		if err := m.checkVMIErrorsAndUpdateStatus(ctx, machine, vmi, remoteClient); err != nil {
 			logger.Error(err, "Failed to check VMI errors")
-		}
-		for i := range vmi.Status.Conditions {
-			c := vmi.Status.Conditions[i]
-			logger.Info("VMI condition", "type", c.Type, "status", c.Status, "reason", c.Reason)
 		}
 		return
 	}
@@ -273,8 +268,6 @@ func (m *StatusManager) checkVMErrorsAndUpdateStatus(ctx context.Context, machin
 
 // updateStatusFromPodVMVMIStatus fetches the Pod created by the VMI from the remote cluster and extracts HostIP and PodIP, and update status from VM
 func (m *StatusManager) updateStatusFromPodVMVMIStatus(ctx context.Context, machine *vitistackv1alpha1.Machine, vmi *kubevirtv1.VirtualMachineInstance, remoteClient client.Client) error {
-	logger := log.FromContext(ctx)
-
 	// Get all Pods in the VMI's namespace from the remote cluster and find one that contains the VMI name
 	// KubeVirt creates Pods with names that contain the VMI name but may have additional suffixes
 	podList := &corev1.PodList{}
@@ -302,11 +295,8 @@ func (m *StatusManager) updateStatusFromPodVMVMIStatus(ctx context.Context, mach
 	}
 
 	if matchedPod == nil {
-		logger.Info("No Pod found for VMI", "vmi", vmi.Name, "namespace", vmi.Namespace)
 		return nil // Not an error - Pod might not be created yet
 	}
-
-	logger.Info("Found Pod for VMI", "pod", matchedPod.Name, "namespace", matchedPod.Namespace, "hostIP", matchedPod.Status.HostIP, "podIP", matchedPod.Status.PodIP)
 
 	networkInterfaces := []vitistackv1alpha1.NetworkInterfaceStatus{}
 	networkInterfaces = extractNetworkInterfacesFromVMI(vmi, networkInterfaces)

@@ -125,7 +125,7 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			logger.Error(err, "Failed to update machine annotations with kubevirt config")
 			// Continue anyway, we can retry on next reconcile
 		} else {
-			logger.Info("Automatically assigned KubevirtConfig to machine",
+			logger.V(1).Info("Automatically assigned KubevirtConfig to machine",
 				"machine", machine.Name,
 				"kubevirtConfig", kubevirtConfigName)
 		}
