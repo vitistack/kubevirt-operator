@@ -176,7 +176,7 @@ func (m *NetworkManager) ensureNetworkAttachmentDefinition(ctx context.Context, 
 // createNetworkAttachmentDefinition creates a NetworkAttachmentDefinition with the specified VLAN ID
 func (m *NetworkManager) createNetworkAttachmentDefinition(ctx context.Context, name, namespace string, vlanId int, remoteClient client.Client) (*netattdefv1.NetworkAttachmentDefinition, error) {
 	logger := log.FromContext(ctx)
-	
+
 	// Get CNI version from configuration (defaults to "1.0.0")
 	cniVersion := viper.GetString(consts.CNI_VERSION)
 	if cniVersion == "" {
@@ -297,14 +297,14 @@ func (m *NetworkManager) CleanupNetworkAttachmentDefinition(ctx context.Context,
 			skippedVMs++
 			continue
 		}
-		
+
 		activeVMs++
 		usingNAD := isVMUsingNAD(vm, nadName)
 		logger.Info("Checking VM for NAD usage",
 			"vm", vm.Name,
 			"usingNAD", usingNAD,
 			"nadName", nadName)
-			
+
 		if usingNAD {
 			logger.Info("NetworkAttachmentDefinition is still in use by VirtualMachine, skipping deletion",
 				"nad", nadName,
@@ -423,7 +423,7 @@ func (m *NetworkManager) CleanupOrphanedNADs(ctx context.Context, namespace stri
 
 	// List all NADs managed by this operator in the namespace
 	nadList := &netattdefv1.NetworkAttachmentDefinitionList{}
-	if err := remoteClient.List(ctx, nadList, 
+	if err := remoteClient.List(ctx, nadList,
 		client.InNamespace(namespace),
 		client.MatchingLabels{"managed-by": managedBy}); err != nil {
 		return fmt.Errorf("failed to list NetworkAttachmentDefinitions: %w", err)
@@ -472,7 +472,7 @@ func (m *NetworkManager) CleanupOrphanedNADs(ctx context.Context, namespace stri
 			logger.Info("NAD is not in use, deleting",
 				"nad", nad.Name,
 				"namespace", namespace)
-			
+
 			if err := remoteClient.Delete(ctx, nad); err != nil {
 				if !errors.IsNotFound(err) {
 					logger.Error(err, "Failed to delete orphaned NAD",

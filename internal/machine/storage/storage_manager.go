@@ -235,7 +235,7 @@ func (m *StorageManager) DeleteAssociatedPVCs(ctx context.Context, machine *viti
 		logger.Info("Deleting PVC from remote cluster",
 			"pvc", pvc.Name,
 			"namespace", pvc.Namespace)
-		
+
 		if err := remoteClient.Delete(ctx, pvc); err != nil {
 			if errors.IsNotFound(err) {
 				logger.Info("PVC already deleted", "pvc", pvc.Name)
