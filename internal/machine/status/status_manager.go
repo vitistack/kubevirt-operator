@@ -275,48 +275,82 @@ func (m *StatusManager) updateStatusFromPodVMVMIStatus(ctx context.Context, mach
 		return fmt.Errorf("failed to list Pods in namespace %s from remote cluster: %w", vmi.Namespace, err)
 	}
 
-	var matchedPod *corev1.Pod
-	for i := range podList.Items {
-		pod := &podList.Items[i]
-		if pod.Labels == nil {
-			// If there are no labels, we can't determine if this is a KubeVirt Pod
-			continue
-		}
-
-		value, ok := pod.Labels["source-machine"]
-		if !ok {
-			continue
-		}
-
-		if value == machine.Name {
-			matchedPod = pod
-			break
-		}
-	}
-
+	matchedPod := findMatchingPod(podList, machine.Name)
 	if matchedPod == nil {
 		return nil // Not an error - Pod might not be created yet
 	}
 
-	networkInterfaces := []vitistackv1alpha1.NetworkInterfaceStatus{}
-	networkInterfaces = extractNetworkInterfacesFromVMI(vmi, networkInterfaces)
-
-	privateIpAddresses := []string{}
-	for i := range networkInterfaces {
-		networkInterface := &networkInterfaces[i]
-		privateIpAddresses = append(privateIpAddresses, networkInterface.IPAddresses...)
-	}
-
-	machine.Status.PrivateIPAddresses = privateIpAddresses
-	machine.Status.NetworkInterfaces = networkInterfaces
+	networkInterfaces := extractNetworkInterfacesFromVMI(vmi, nil)
+	m.populateIPAddressesFromInterfaces(machine, networkInterfaces)
 
 	diskVolumes, err := extractDiskVolumesFromVMI(vmi)
 	if err != nil {
 		return err
 	}
-
 	machine.Status.Disks = diskVolumes
+
 	return nil
+}
+
+// findMatchingPod searches for a pod with the matching source-machine label
+func findMatchingPod(podList *corev1.PodList, machineName string) *corev1.Pod {
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if pod.Labels == nil {
+			continue
+		}
+		if value, ok := pod.Labels["source-machine"]; ok && value == machineName {
+			return pod
+		}
+	}
+	return nil
+}
+
+// populateIPAddressesFromInterfaces categorizes and populates IP addresses from network interfaces
+func (m *StatusManager) populateIPAddressesFromInterfaces(machine *vitistackv1alpha1.Machine, networkInterfaces []vitistackv1alpha1.NetworkInterfaceStatus) {
+	allIpAddresses := []string{}
+	ipAddressesWithNoName := []string{}
+	ipAddressesWithName := []string{}
+
+	for i := range networkInterfaces {
+		networkInterface := &networkInterfaces[i]
+		allIpAddresses = append(allIpAddresses, networkInterface.IPAddresses...)
+		if networkInterface.Name == "" {
+			ipAddressesWithNoName = append(ipAddressesWithNoName, networkInterface.IPAddresses...)
+		} else {
+			ipAddressesWithName = append(ipAddressesWithName, networkInterface.IPAddresses...)
+		}
+	}
+
+	machine.Status.PublicIPAddresses = ipAddressesWithName
+	machine.Status.PrivateIPAddresses = ipAddressesWithNoName
+	machine.Status.NetworkInterfaces = networkInterfaces
+	machine.Status.IPv6Addresses = filterIPv6Addresses(allIpAddresses)
+	machine.Status.IPAddresses = filterIPv4Addresses(allIpAddresses)
+}
+
+// filterIPv6Addresses extracts IPv6 addresses from a list of IP addresses
+func filterIPv6Addresses(ipAddresses []string) []string {
+	ipv6Addresses := []string{}
+	for i := range ipAddresses {
+		ip := ipAddresses[i]
+		if parsedIP := net.ParseIP(ip); parsedIP != nil && parsedIP.To4() == nil {
+			ipv6Addresses = append(ipv6Addresses, ip)
+		}
+	}
+	return ipv6Addresses
+}
+
+// filterIPv4Addresses extracts IPv4 addresses from a list of IP addresses
+func filterIPv4Addresses(ipAddresses []string) []string {
+	ipv4Addresses := []string{}
+	for i := range ipAddresses {
+		ip := ipAddresses[i]
+		if parsedIP := net.ParseIP(ip); parsedIP != nil && parsedIP.To4() != nil {
+			ipv4Addresses = append(ipv4Addresses, ip)
+		}
+	}
+	return ipv4Addresses
 }
 
 func extractNetworkInterfacesFromVMI(vmi *kubevirtv1.VirtualMachineInstance, networkInterfaces []vitistackv1alpha1.NetworkInterfaceStatus) []vitistackv1alpha1.NetworkInterfaceStatus {
