@@ -362,7 +362,6 @@ func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitista
 }
 
 // cleanupRemoteResources handles cleanup of VM, PVCs, and NAD on the remote KubeVirt cluster
-
 func (r *MachineReconciler) cleanupRemoteResources(ctx context.Context, machine *vitistackv1alpha1.Machine, remoteClient client.Client) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 

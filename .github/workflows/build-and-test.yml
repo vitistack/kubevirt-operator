@@ -23,11 +23,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Configure Git for private repos
-        run: |
-          git config --global url.https://$GH_TOKEN@github.com/.insteadOf https://github.com/
+        uses: actions/checkout@v6
 
       - name: Setup Go
         uses: actions/setup-go@v6
