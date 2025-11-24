@@ -32,6 +32,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	kubevirtv1 "kubevirt.io/api/core/v1"
+	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -73,6 +74,12 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 	// Build disks and volumes from the disk specs
 	disks, volumes := m.buildDisksAndVolumes(machine, pvcNames)
 
+	// Add boot source (ISO) if specified
+	bootSourceType := machine.Annotations["kubevirt.io/boot-source"]
+	if bootSourceType == "datavolume" && machine.Spec.OS.ImageID != "" {
+		disks, volumes = m.addISOBootSource(disks, volumes, vmName)
+	}
+
 	// Calculate resource requirements
 	memoryRequest, cpuRequest := m.calculateResourceRequirements(machine)
 
@@ -87,7 +94,14 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 	runStrategy := kubevirtv1.RunStrategyAlways
 	cpuModel := viper.GetString(consts.CPU_MODEL)
 
-	networkBootOrder := uint(2)
+	// Only set network boot order for PXE boot (when there's no imageID)
+	// When imageID is present (ISO/kernel boot), disk/cdrom gets boot priority
+	var networkBootOrder *uint
+	if machine.Spec.OS.ImageID == "" {
+		bootOrder := uint(2)
+		networkBootOrder = &bootOrder
+	}
+
 	macAddress, err := m.MacGenerator.GetMACAddress()
 	if err != nil {
 		return nil, err
@@ -109,6 +123,8 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 		},
 		Spec: kubevirtv1.VirtualMachineSpec{
 			RunStrategy: &runStrategy, // Use modern RunStrategy instead of deprecated Running field
+			// Add DataVolume templates if using ISO boot
+			DataVolumeTemplates: m.buildDataVolumeTemplates(machine, vmName),
 			Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -136,7 +152,7 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 									InterfaceBindingMethod: kubevirtv1.InterfaceBindingMethod{
 										Bridge: &kubevirtv1.InterfaceBridge{},
 									},
-									BootOrder:  &networkBootOrder,
+									BootOrder:  networkBootOrder,
 									MacAddress: macAddress,
 								},
 							},
@@ -323,6 +339,95 @@ func (m *VMManager) buildDisksAndVolumes(machine *vitistackv1alpha1.Machine, pvc
 	}
 
 	return disks, volumes
+}
+
+// addISOBootSource adds an ISO image as a CDROM boot source
+func (m *VMManager) addISOBootSource(disks []kubevirtv1.Disk, volumes []kubevirtv1.Volume, vmName string) ([]kubevirtv1.Disk, []kubevirtv1.Volume) {
+	// Add CDROM disk for ISO with boot order 2 (after root disk)
+	// This allows booting from ISO for installation, but prioritizes
+	// the root disk after OS installation completes
+	bootOrder := uint(2)
+	disks = append(disks, kubevirtv1.Disk{
+		Name: "cdrom-iso",
+		DiskDevice: kubevirtv1.DiskDevice{
+			CDRom: &kubevirtv1.CDRomTarget{
+				Bus: "sata",
+			},
+		},
+		BootOrder: &bootOrder,
+	})
+
+	// Add volume referencing the DataVolume
+	volumes = append(volumes, kubevirtv1.Volume{
+		Name: "cdrom-iso",
+		VolumeSource: kubevirtv1.VolumeSource{
+			DataVolume: &kubevirtv1.DataVolumeSource{
+				Name: vmName + "-iso",
+			},
+		},
+	})
+
+	// Root disk keeps boot order 1, ISO is boot order 2
+	// Most firmware will skip empty disks and boot from ISO on first run
+	// After installation, it will boot from the installed OS on root disk
+
+	return disks, volumes
+}
+
+// buildDataVolumeTemplates creates DataVolume templates for ISO boot
+func (m *VMManager) buildDataVolumeTemplates(machine *vitistackv1alpha1.Machine, vmName string) []kubevirtv1.DataVolumeTemplateSpec {
+	bootSourceType := machine.Annotations["kubevirt.io/boot-source"]
+	if bootSourceType != "datavolume" || machine.Spec.OS.ImageID == "" {
+		return nil
+	}
+
+	// Determine source type (http, registry, pvc, etc.)
+	sourceType := machine.Annotations["kubevirt.io/boot-source-type"]
+	if sourceType == "" {
+		sourceType = "http" // Default to HTTP
+	}
+
+	storageSize := resource.MustParse("10Gi")
+	// ISO images require Filesystem volume mode for CDROM
+	filesystemMode := corev1.PersistentVolumeFilesystem
+
+	template := kubevirtv1.DataVolumeTemplateSpec{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: vmName + "-iso",
+			Labels: map[string]string{
+				"managed-by":     viper.GetString(consts.MANAGED_BY),
+				"source-machine": machine.Name,
+			},
+		},
+		Spec: cdiv1.DataVolumeSpec{
+			Storage: &cdiv1.StorageSpec{
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceStorage: storageSize,
+					},
+				},
+				VolumeMode: &filesystemMode,
+			},
+		},
+	}
+
+	// Build the DataVolume source based on type
+	switch sourceType {
+	case "http", "https":
+		template.Spec.Source = &cdiv1.DataVolumeSource{
+			HTTP: &cdiv1.DataVolumeSourceHTTP{
+				URL: machine.Spec.OS.ImageID,
+			},
+		}
+	case "registry":
+		template.Spec.Source = &cdiv1.DataVolumeSource{
+			Registry: &cdiv1.DataVolumeSourceRegistry{
+				URL: &machine.Spec.OS.ImageID,
+			},
+		}
+	}
+
+	return []kubevirtv1.DataVolumeTemplateSpec{template}
 }
 
 // generateShortNetworkConfigName generates a shortened name for NetworkConfiguration spec.name field

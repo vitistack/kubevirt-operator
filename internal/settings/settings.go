@@ -29,6 +29,8 @@ func Init() {
 	viper.SetDefault(consts.MANAGED_BY, "kubevirt-operator")
 	viper.SetDefault(consts.VM_NAME_PREFIX, "")
 	viper.SetDefault(consts.PVC_VOLUME_MODE, "Block") // Options: "Block" (default) or "Filesystem"
+	viper.SetDefault(consts.IP_SOURCE, "vmi")
+	viper.SetDefault(consts.KUBEVIRT_SUPPORT_CONTAINERIZED_DATA_IMPORTER, false)
 
 	dotenv.LoadDotEnv()
 

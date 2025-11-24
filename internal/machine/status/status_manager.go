@@ -24,9 +24,11 @@ import (
 
 	"net"
 
+	"github.com/spf13/viper"
+	"github.com/vitistack/common/pkg/loggers/vlog"
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
+	"github.com/vitistack/kubevirt-operator/internal/consts"
 	"github.com/vitistack/kubevirt-operator/internal/machine/events"
-	"github.com/vitistack/kubevirt-operator/pkg/consts"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -280,8 +282,76 @@ func (m *StatusManager) updateStatusFromPodVMVMIStatus(ctx context.Context, mach
 		return nil // Not an error - Pod might not be created yet
 	}
 
+	// Extract network interfaces from VMI
 	networkInterfaces := extractNetworkInterfacesFromVMI(vmi, nil)
-	m.populateIPAddressesFromInterfaces(machine, networkInterfaces)
+
+	// Determine IP source from environment variable
+	ipSource := viper.GetString(consts.IP_SOURCE)
+	if ipSource == "" {
+		ipSource = "vmi" // Default to VMI
+	}
+
+	vlog.Info("Using IP source configuration",
+		"ipSource", ipSource,
+		"machine", machine.Name)
+
+	// Populate IP addresses based on configured source
+	switch ipSource {
+	case "networkconfiguration":
+		// Fetch public IPs from NetworkConfiguration status (Kea integration)
+		publicIPs, err := m.fetchPublicIPsFromNetworkConfiguration(ctx, machine)
+		if err != nil {
+			vlog.Error(err, "Failed to fetch public IPs from NetworkConfiguration, falling back to VMI")
+			// Fall back to VMI if NetworkConfiguration fetch fails
+			m.populateIPAddressesFromInterfaces(machine, networkInterfaces)
+		} else {
+			// Use NetworkConfiguration IPs for public IPs, but still use VMI for private IPs
+			allIpAddresses := []string{}
+			ipAddressesWithNoName := []string{}
+
+			// Extract private IPs from VMI interfaces (interfaces with no name)
+			for i := range networkInterfaces {
+				networkInterface := &networkInterfaces[i]
+				if networkInterface.Name == "" {
+					ipAddressesWithNoName = append(ipAddressesWithNoName, networkInterface.IPAddresses...)
+					allIpAddresses = append(allIpAddresses, networkInterface.IPAddresses...)
+				}
+			}
+
+			// Add public IPs from NetworkConfiguration (not from VMI to avoid duplicates)
+			allIpAddresses = append(allIpAddresses, publicIPs...)
+
+			// Use NetworkConfiguration for public IPs
+			machine.Status.PublicIPAddresses = publicIPs
+			machine.Status.PrivateIPAddresses = ipAddressesWithNoName
+			machine.Status.NetworkInterfaces = networkInterfaces
+			machine.Status.IPv6Addresses = filterIPv6Addresses(allIpAddresses)
+			machine.Status.IPAddresses = filterIPv4Addresses(allIpAddresses)
+
+			vlog.Info("Populated IP addresses from NetworkConfiguration",
+				"machine", machine.Name,
+				"publicIPCount", len(publicIPs),
+				"privateIPCount", len(ipAddressesWithNoName))
+		}
+
+		// Update NetworkConfiguration status with VMI network interfaces for consistency
+		if err := m.updateNetworkConfigurationStatus(ctx, machine, networkInterfaces); err != nil {
+			vlog.Warn(err, "Failed to update NetworkConfiguration status")
+			// Don't fail the whole operation if status update fails
+		}
+
+	case "vmi":
+		fallthrough
+	default:
+		// Default: Fetch IPs from VMI (KubeVirt)
+		m.populateIPAddressesFromInterfaces(machine, networkInterfaces)
+
+		// Also update NetworkConfiguration status for consistency
+		if err := m.updateNetworkConfigurationStatus(ctx, machine, networkInterfaces); err != nil {
+			vlog.Warn(err, "Failed to update NetworkConfiguration status")
+			// Don't fail the whole operation if status update fails
+		}
+	}
 
 	diskVolumes, err := extractDiskVolumesFromVMI(vmi)
 	if err != nil {
@@ -424,4 +494,134 @@ func extractDiskVolumesFromVMI(vmi *kubevirtv1.VirtualMachineInstance) ([]vitist
 		}
 	}
 	return diskVolumes, nil
+}
+
+// fetchPublicIPsFromNetworkConfiguration retrieves public IP addresses from NetworkConfiguration status
+// This is used when IP_SOURCE is set to "networkconfiguration" (Kea integration)
+func (m *StatusManager) fetchPublicIPsFromNetworkConfiguration(ctx context.Context, machine *vitistackv1alpha1.Machine) ([]string, error) {
+	// Get NetworkConfiguration for this machine
+	netConfig := &vitistackv1alpha1.NetworkConfiguration{}
+	err := m.Get(ctx, types.NamespacedName{Name: machine.Name, Namespace: machine.Namespace}, netConfig)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			vlog.Info("NetworkConfiguration not found, no public IPs available from NetworkConfiguration", "machine", machine.Name)
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("failed to get NetworkConfiguration: %w", err)
+	}
+
+	// Collect all IP addresses from NetworkConfiguration status
+	publicIPs := []string{}
+	for i := range netConfig.Status.NetworkInterfaces {
+		iface := &netConfig.Status.NetworkInterfaces[i]
+		// Add both IPv4 and IPv6 addresses
+		publicIPs = append(publicIPs, iface.IPv4Addresses...)
+		publicIPs = append(publicIPs, iface.IPv6Addresses...)
+	}
+
+	if len(publicIPs) > 0 {
+		vlog.Info("Fetched public IPs from NetworkConfiguration",
+			"machine", machine.Name,
+			"ipCount", len(publicIPs),
+			"ips", publicIPs)
+	}
+
+	return publicIPs, nil
+}
+
+// updateNetworkConfigurationStatus updates the NetworkConfiguration status with IP addresses from VMI
+// This is called when IP addresses are fetched from VMI, to keep NetworkConfiguration status in sync
+func (m *StatusManager) updateNetworkConfigurationStatus(ctx context.Context, machine *vitistackv1alpha1.Machine, networkInterfaces []vitistackv1alpha1.NetworkInterfaceStatus) error {
+	// Get NetworkConfiguration for this machine
+	netConfig := &vitistackv1alpha1.NetworkConfiguration{}
+	err := m.Get(ctx, types.NamespacedName{Name: machine.Name, Namespace: machine.Namespace}, netConfig)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			vlog.Info("NetworkConfiguration not found, skipping status update", "machine", machine.Name)
+			return nil
+		}
+		return fmt.Errorf("failed to get NetworkConfiguration: %w", err)
+	}
+
+	// Convert network interfaces to NetworkConfigurationInterface format
+	// Build a map of existing interfaces by MAC address to avoid duplicates
+	existingInterfaces := make(map[string]vitistackv1alpha1.NetworkConfigurationInterface)
+	for i := range netConfig.Status.NetworkInterfaces {
+		iface := &netConfig.Status.NetworkInterfaces[i]
+		if iface.MacAddress != "" {
+			existingInterfaces[iface.MacAddress] = *iface
+		}
+	}
+
+	statusInterfaces := []vitistackv1alpha1.NetworkConfigurationInterface{}
+	for i := range networkInterfaces {
+		iface := &networkInterfaces[i]
+
+		// Skip if MAC address is empty
+		if iface.MACAddress == "" {
+			continue
+		}
+
+		// Separate IPv4 and IPv6 addresses
+		ipv4Addrs := []string{}
+		ipv6Addrs := []string{}
+		for j := range iface.IPAddresses {
+			ip := iface.IPAddresses[j]
+			if parsedIP := net.ParseIP(ip); parsedIP != nil {
+				if parsedIP.To4() != nil {
+					ipv4Addrs = append(ipv4Addrs, ip)
+				} else {
+					ipv6Addrs = append(ipv6Addrs, ip)
+				}
+			}
+		}
+
+		// Check if this interface already exists and merge with existing data
+		if existing, exists := existingInterfaces[iface.MACAddress]; exists {
+			// Merge IP addresses - use existing if they have DHCP-reserved IPs, otherwise use VMI IPs
+			if len(existing.IPv4Addresses) > 0 {
+				ipv4Addrs = existing.IPv4Addresses
+			}
+			if len(existing.IPv6Addresses) > 0 {
+				ipv6Addrs = existing.IPv6Addresses
+			}
+
+			statusInterfaces = append(statusInterfaces, vitistackv1alpha1.NetworkConfigurationInterface{
+				Name:          iface.Name,
+				MacAddress:    iface.MACAddress,
+				IPv4Addresses: ipv4Addrs,
+				IPv6Addresses: ipv6Addrs,
+				Vlan:          existing.Vlan,
+				IPv4Subnet:    existing.IPv4Subnet,
+				IPv6Subnet:    existing.IPv6Subnet,
+				IPv4Gateway:   existing.IPv4Gateway,
+				IPv6Gateway:   existing.IPv6Gateway,
+				DNS:           existing.DNS,
+				DHCPReserved:  existing.DHCPReserved,
+			})
+		} else {
+			// New interface
+			statusInterfaces = append(statusInterfaces, vitistackv1alpha1.NetworkConfigurationInterface{
+				Name:          iface.Name,
+				MacAddress:    iface.MACAddress,
+				IPv4Addresses: ipv4Addrs,
+				IPv6Addresses: ipv6Addrs,
+			})
+		}
+	}
+
+	// Update the NetworkConfiguration status
+	netConfig.Status.NetworkInterfaces = statusInterfaces
+	netConfig.Status.Phase = "Active"
+	netConfig.Status.Status = "Ready"
+
+	if err := m.Status().Update(ctx, netConfig); err != nil {
+		return fmt.Errorf("failed to update NetworkConfiguration status: %w", err)
+	}
+
+	vlog.Info("Updated NetworkConfiguration status with IP addresses",
+		"machine", machine.Name,
+		"interfaceCount", len(statusInterfaces))
+
+	return nil
 }

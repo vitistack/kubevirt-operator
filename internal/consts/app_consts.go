@@ -15,4 +15,8 @@ const (
 	DEFAULT_KUBEVIRT_CONFIG    = "DEFAULT_KUBEVIRT_CONFIG"
 	VM_NAME_PREFIX             = "VM_NAME_PREFIX"
 	PVC_VOLUME_MODE            = "PVC_VOLUME_MODE"
+	// IP_SOURCE controls where public IP addresses are fetched from
+	// Valid values: "vmi" (default, from KubeVirt VMI), "networkconfiguration" (from NetworkConfiguration status)
+	IP_SOURCE                                    = "IP_SOURCE"
+	KUBEVIRT_SUPPORT_CONTAINERIZED_DATA_IMPORTER = "KUBEVIRT_SUPPORT_CONTAINERIZED_DATA_IMPORTER"
 )

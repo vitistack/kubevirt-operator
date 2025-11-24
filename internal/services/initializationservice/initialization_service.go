@@ -15,12 +15,13 @@ import (
 func CheckPrerequisites() {
 	vlog.Info("Running prerequisite checks...")
 
-	crdcheck.MustEnsureInstalled(context.TODO(),
-		// your CRD plural
-		crdcheck.Ref{Group: "vitistack.io", Version: "v1alpha1", Resource: "machines"},
-		crdcheck.Ref{Group: "vitistack.io", Version: "v1alpha1", Resource: "kubevirtconfigs"},
-	)
+	checks := []crdcheck.Ref{
+		{Group: "vitistack.io", Version: "v1alpha1", Resource: "machines"},
+		{Group: "vitistack.io", Version: "v1alpha1", Resource: "kubevirtconfigs"},
+		{Group: "vitistack.io", Version: "v1alpha1", Resource: "networkconfigurations"},
+	}
 
+	crdcheck.MustEnsureInstalled(context.TODO(), checks...)
 	vlog.Info("✅ Prerequisite checks passed (supervisor cluster)")
 }
 

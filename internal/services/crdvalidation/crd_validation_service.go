@@ -20,8 +20,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/spf13/viper"
 	"github.com/vitistack/common/pkg/loggers/vlog"
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
+	"github.com/vitistack/kubevirt-operator/internal/consts"
 	"github.com/vitistack/kubevirt-operator/pkg/clients"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -125,6 +127,12 @@ func checkKubevirtCRDVersions(ctx context.Context, clientMgr clients.ClientManag
 	kubevirtCRDsToCheck := []schema.GroupVersionResource{
 		{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachines"},
 		{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachineinstances"},
+	}
+
+	if viper.GetBool(consts.KUBEVIRT_SUPPORT_CONTAINERIZED_DATA_IMPORTER) {
+		kubevirtCRDsToCheck = append(kubevirtCRDsToCheck,
+			schema.GroupVersionResource{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "datavolumes"},
+		)
 	}
 
 	var baselineKubevirtVersions map[string]string

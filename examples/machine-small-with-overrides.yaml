@@ -15,3 +15,4 @@ spec:
     sockets: 4
     threadsPerCore: 2
   memory: 4294967296 # 4 GB in bytes
+
