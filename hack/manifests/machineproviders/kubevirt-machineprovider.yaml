@@ -1,0 +1,13 @@
+apiVersion: vitistack.io/v1alpha1
+kind: MachineProvider
+metadata:
+  name: kubevirt-instance-1-provider
+spec:
+  displayName: test-kubevirt1
+  providerType: kubevirt
+  region: default
+  authentication:
+    type: credentials
+    credentialsRef:
+      secretName: kubevirt-instance-1-secret
+      namespace: default

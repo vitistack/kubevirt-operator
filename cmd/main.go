@@ -118,7 +118,7 @@ func main() {
 	// Initialize services with the direct client (not cached)
 	services.InitializeServices(directClient)
 
-	err = initializationservice.RegisterMachineProviderCRDIfNeeded("") // default namespace for now, todo
+	err = initializationservice.RegisterMachineProviderCRDIfNeeded(viper.GetString(consts.NAMESPACE)) // default namespace for now, todo
 	if err != nil {
 		setupLog.Error(err, "failed to register MachineProvider CRD if needed")
 		os.Exit(1)

@@ -2,7 +2,7 @@ package consts
 
 const (
 	DEVELOPMENT                = "DEVELOPMENT"
-	NAMESPACE                  = "default"
+	NAMESPACE                  = "NAMESPACE"
 	CPU_MODEL                  = "CPU_MODEL"
 	CNI_VERSION                = "CNI_VERSION"
 	LOG_LEVEL                  = "LOG_LEVEL"
@@ -20,4 +20,6 @@ const (
 	// Valid values: "vmi" (default, from KubeVirt VMI), "networkconfiguration" (from NetworkConfiguration status)
 	IP_SOURCE                                    = "IP_SOURCE"
 	KUBEVIRT_SUPPORT_CONTAINERIZED_DATA_IMPORTER = "KUBEVIRT_SUPPORT_CONTAINERIZED_DATA_IMPORTER"
+	VITISTACK_NAME                               = "VITISTACK_NAME"
+	NAME_MACHINE_PROVIDER                        = "NAME_MACHINE_PROVIDER"
 )

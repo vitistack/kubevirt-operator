@@ -1,7 +1,0 @@
-apiVersion: vitistack.io/v1alpha1
-kind: KubevirtConfig
-metadata:
-  name: kubevirt-instance-1
-spec:
-  name: test-kubevirt1
-  kubeconfigSecretRef: kubevirt

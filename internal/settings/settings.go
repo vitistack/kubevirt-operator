@@ -25,6 +25,7 @@ func Init() {
 	viper.SetDefault(consts.DEVELOPMENT, false)
 	viper.SetDefault(consts.CPU_MODEL, cpuModel)
 	viper.SetDefault(consts.CNI_VERSION, "1.0.0")
+	viper.SetDefault(consts.NAMESPACE, "default")
 	viper.SetDefault(consts.LOG_JSON, true)
 	viper.SetDefault(consts.LOG_LEVEL, "info")
 	viper.SetDefault(consts.MANAGED_BY, "kubevirt-operator")
@@ -32,6 +33,7 @@ func Init() {
 	viper.SetDefault(consts.PVC_VOLUME_MODE, "Block") // Options: "Block" (default) or "Filesystem"
 	viper.SetDefault(consts.IP_SOURCE, "vmi")
 	viper.SetDefault(consts.KUBEVIRT_SUPPORT_CONTAINERIZED_DATA_IMPORTER, false)
+	viper.SetDefault(consts.NAME_MACHINE_PROVIDER, "kubevirt-provider")
 
 	dotenv.LoadDotEnv()
 

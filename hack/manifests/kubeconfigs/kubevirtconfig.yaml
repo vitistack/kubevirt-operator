@@ -1,0 +1,7 @@
+apiVersion: vitistack.io/v1alpha1
+kind: KubevirtConfig
+metadata:
+  name: kubevirt-provider
+spec:
+  name: kubevirt-provider
+  kubeconfigSecretRef: kubevirt-provider

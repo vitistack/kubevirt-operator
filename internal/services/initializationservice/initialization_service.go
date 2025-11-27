@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/spf13/viper"
 	"github.com/vitistack/common/pkg/loggers/vlog"
 	"github.com/vitistack/common/pkg/operator/crdcheck"
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
+	"github.com/vitistack/kubevirt-operator/internal/consts"
 	"github.com/vitistack/kubevirt-operator/internal/services"
 	"github.com/vitistack/kubevirt-operator/internal/services/crdvalidation"
 	"github.com/vitistack/kubevirt-operator/internal/services/kubevirtvalidation"
+	"github.com/vitistack/kubevirt-operator/internal/services/vitistackservice"
 	"github.com/vitistack/kubevirt-operator/pkg/clients"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -71,48 +74,78 @@ func CheckKubevirtClustersAvailable(clientMgr clients.ClientManager) {
 	vlog.Info("✅ All KubeVirt clusters are available and ready")
 }
 
-// register machine provider crd if no objects exist
+// RegisterMachineProviderCRDIfNeeded checks if the MachineProvider for this operator exists
+// If not found, it looks up the matching KubevirtConfig and registers the MachineProvider
 func RegisterMachineProviderCRDIfNeeded(namespace string) error {
 	ctx := context.TODO()
 
-	// list all MachineProvider objects
-	kubeconfigs, err := services.KubevirtConfigService.FetchAllKubevirtConfigs(ctx, namespace)
-	if err != nil {
-		return fmt.Errorf("failed to list KubevirtConfig objects: %w", err)
-	}
-	vlog.Debug("Kubeconfigs", kubeconfigs)
-
-	machineProviders, err := services.MachineProviderService.FetchAllMachineProviders(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to list MachineProvider objects: %w", err)
+	// Get the machine provider name for this operator
+	machineProviderName := viper.GetString(consts.NAME_MACHINE_PROVIDER)
+	if machineProviderName == "" {
+		return fmt.Errorf("NAME_MACHINE_PROVIDER not configured")
 	}
 
-	vlog.Debug("MachineProviders", machineProviders)
+	vlog.Info("Checking for MachineProvider", "name", machineProviderName)
 
-	for i := range kubeconfigs {
-		kubeconfig := kubeconfigs[i]
-		found := false
-		for j := range machineProviders {
-			machineProvider := machineProviders[j]
-			// MachineProvider is cluster-scoped (no namespace), so only compare by name
-			if machineProvider.Name == kubeconfig.Name {
-				found = true
-				break
+	// First check if vitistack object has a matching MachineProvider
+	vitistackName := viper.GetString(consts.VITISTACK_NAME)
+	if vitistackName != "" {
+		vitistack, err := vitistackservice.FetchVitistackByName(ctx, vitistackName)
+		if err == nil && vitistack != nil {
+			for _, mpRef := range vitistack.Spec.MachineProviders {
+				if mpRef.Name == machineProviderName {
+					vlog.Info("MachineProvider found in Vitistack spec", "name", machineProviderName, "vitistack", vitistackName)
+					return nil
+				}
 			}
 		}
-		if !found {
-			vlog.Info("No MachineProvider found for KubevirtConfig " + kubeconfig.Name + ", registering CRD")
-			err := registerMachineProvider(ctx, &kubeconfig)
-			if err != nil {
-				return fmt.Errorf("failed to register MachineProvider CRD: %w", err)
-			}
-			vlog.Info("MachineProvider CRD registered successfully")
-		}
 	}
+
+	// Check if the MachineProvider already exists
+	existingProvider, err := services.MachineProviderService.FetchMachineProviderByName(ctx, machineProviderName)
+	if err == nil && existingProvider != nil {
+		vlog.Info("MachineProvider already exists", "name", machineProviderName)
+		return nil
+	}
+
+	vlog.Info("MachineProvider not found, looking for matching KubevirtConfig", "name", machineProviderName)
+
+	// Find the matching KubevirtConfig by name
+	kubevirtConfig, err := services.KubevirtConfigService.FetchKubevirtConfigByName(ctx, machineProviderName, namespace)
+	if err != nil {
+		return fmt.Errorf("failed to find KubevirtConfig with name %s: %w", machineProviderName, err)
+	}
+
+	vlog.Info("Found matching KubevirtConfig, registering MachineProvider", "name", kubevirtConfig.Name)
+
+	// Register the MachineProvider
+	err = registerMachineProvider(ctx, kubevirtConfig)
+	if err != nil {
+		return fmt.Errorf("failed to register MachineProvider CRD: %w", err)
+	}
+
+	vlog.Info("MachineProvider CRD registered successfully", "name", machineProviderName)
 	return nil
 }
 
 func registerMachineProvider(ctx context.Context, kubeconfig *vitistackv1alpha1.KubevirtConfig) error {
+	// fetch vitistack object
+	defaultRegion := "unknown"
+	vitistackName := viper.GetString(consts.VITISTACK_NAME)
+	if vitistackName == "" {
+		vlog.Info("VITISTACK_NAME not configured, using default region", "region", defaultRegion)
+		return fmt.Errorf("VITISTACK_NAME not configured")
+	}
+
+	vitistack, err := vitistackservice.FetchVitistackByName(ctx, vitistackName)
+	if err != nil {
+		vlog.Warn("Failed to fetch Vitistack, using default region",
+			"vitistackName", vitistackName,
+			"error", err,
+			"region", defaultRegion)
+		return err
+	}
+
 	// Create a MachineProvider object for the KubevirtConfig
 	machineProvider := &vitistackv1alpha1.MachineProvider{
 		ObjectMeta: metav1.ObjectMeta{
@@ -124,7 +157,7 @@ func registerMachineProvider(ctx context.Context, kubeconfig *vitistackv1alpha1.
 		Spec: vitistackv1alpha1.MachineProviderSpec{
 			DisplayName:  kubeconfig.Name,
 			ProviderType: string(vitistackv1alpha1.MachineProviderTypeKubevirt),
-			Region:       "default",
+			Region:       vitistack.Spec.Region,
 			Authentication: vitistackv1alpha1.ProviderAuthentication{
 				Type: "credentials",
 				CredentialsRef: &vitistackv1alpha1.CredentialsReference{
