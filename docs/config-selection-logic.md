@@ -102,7 +102,7 @@ export DEFAULT_KUBEVIRT_CONFIG=staging-cluster
 
 ### Priority 3: Single Config Auto-Selection
 
-**Condition:** Exactly ONE KubevirtConfig exists in namespace
+**Condition:** Exactly ONE KubevirtConfig exists (cluster-scoped)
 
 **Action:** Use that config automatically
 
@@ -111,9 +111,9 @@ export DEFAULT_KUBEVIRT_CONFIG=staging-cluster
 **Example:**
 
 ```bash
-$ kubectl get kubevirtconfig -n kubevirt-configs
-NAME           ENDPOINT
-cluster-main   https://main.example.com:6443
+$ kubectl get kubevirtconfig
+NAME           SECRETNAMESPACE
+cluster-main   kubevirt-secrets
 ```
 
 **Use Case:**
@@ -144,10 +144,10 @@ cluster-main   https://main.example.com:6443
 **Example:**
 
 ```bash
-$ kubectl get kubevirtconfig -n kubevirt-configs
-NAME            ENDPOINT
-cluster-east    https://east.example.com:6443
-cluster-west    https://west.example.com:6443
+$ kubectl get kubevirtconfig
+NAME            SECRETNAMESPACE
+cluster-east    kubevirt-secrets
+cluster-west    kubevirt-secrets
 
 # VM vm-my-app already exists in cluster-west
 # Machine my-app will automatically discover it
@@ -166,20 +166,20 @@ cluster-west    https://west.example.com:6443
 
 ### Error 1: No Configs Available
 
-**Condition:** Zero KubevirtConfigs exist in namespace
+**Condition:** Zero KubevirtConfigs exist (cluster-scoped)
 
 **Error Message:**
 
 ```
 machine default/my-vm has no KubevirtConfig reference and no KubevirtConfigs
-are available in namespace kubevirt-configs
+are available
 ```
 
 **Resolution:**
 
-- Create at least one KubevirtConfig CRD
-- Ensure KUBEVIRT_CONFIGS_NAMESPACE is correct
+- Create at least one KubevirtConfig CRD (cluster-scoped)
 - Check RBAC permissions
+- Ensure the Secret exists in the namespace specified by `spec.secretNamespace`
 
 ---
 
@@ -214,7 +214,11 @@ apiVersion: vitistack.io/v1alpha1
 kind: KubevirtConfig
 metadata:
   name: main-cluster
-  namespace: kubevirt-configs
+  # No namespace - cluster-scoped
+spec:
+  name: main-cluster
+  kubeconfigSecretRef: main-cluster-kubeconfig
+  secretNamespace: kubevirt-secrets
 ```
 
 **Machine Creation:**
@@ -243,16 +247,24 @@ metadata:
 # Environment
 DEFAULT_KUBEVIRT_CONFIG=production-east
 
-# Configs
+# Configs (cluster-scoped)
 apiVersion: vitistack.io/v1alpha1
 kind: KubevirtConfig
 metadata:
   name: production-east
+spec:
+  name: production-east
+  kubeconfigSecretRef: production-east-kubeconfig
+  secretNamespace: kubevirt-secrets
 ---
 apiVersion: vitistack.io/v1alpha1
 kind: KubevirtConfig
 metadata:
   name: production-west
+spec:
+  name: production-west
+  kubeconfigSecretRef: production-west-kubeconfig
+  secretNamespace: kubevirt-secrets
 ```
 
 **Machine Creation:**
@@ -286,16 +298,24 @@ metadata:
 **Setup:**
 
 ```yaml
-# Multiple clusters
+# Multiple clusters (cluster-scoped)
 apiVersion: vitistack.io/v1alpha1
 kind: KubevirtConfig
 metadata:
   name: cluster-a
+spec:
+  name: cluster-a
+  kubeconfigSecretRef: cluster-a-kubeconfig
+  secretNamespace: kubevirt-secrets
 ---
 apiVersion: vitistack.io/v1alpha1
 kind: KubevirtConfig
 metadata:
   name: cluster-b
+spec:
+  name: cluster-b
+  kubeconfigSecretRef: cluster-b-kubeconfig
+  secretNamespace: kubevirt-secrets
 ```
 
 **Scenario: Existing VMs**

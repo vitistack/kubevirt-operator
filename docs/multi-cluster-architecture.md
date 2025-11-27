@@ -110,14 +110,14 @@ The reconciler depends on the `ClientManager` interface rather than the concrete
 
 **New Constants (`internal/consts/app_consts.go`):**
 
-- `KUBEVIRT_CONFIGS_NAMESPACE` - Namespace where KubevirtConfig CRDs are stored
 - `DEFAULT_KUBEVIRT_CONFIG` - Optional default config name if Machine doesn't specify one
 
 **Configuration in `cmd/main.go`:**
 
-- Initializes KubevirtClientManager with configured namespace
-- Falls back to "default" namespace if not specified
+- Initializes KubevirtClientManager
 - Passes manager to reconciler constructor
+
+> **Note:** KubevirtConfig is cluster-scoped. Each KubevirtConfig specifies its own `spec.secretNamespace` where the kubeconfig secret is stored.
 
 ### 5. RBAC Updates
 
@@ -137,6 +137,8 @@ These allow the operator to:
 
 ## KubevirtConfig CRD
 
+KubevirtConfig is a **cluster-scoped** resource. Each KubevirtConfig specifies its own `secretNamespace` where the kubeconfig secret is stored.
+
 Expected structure (from `hack/vitistack-crds/vitistack.io_kubevirtconfigs.yaml`):
 
 ```yaml
@@ -144,23 +146,24 @@ apiVersion: vitistack.io/v1alpha1
 kind: KubevirtConfig
 metadata:
   name: cluster-east
-  namespace: kubevirt-configs
+  # No namespace - cluster-scoped resource
 spec:
   name: cluster-east
   kubeconfigSecretRef: cluster-east-kubeconfig
+  secretNamespace: kubevirt-secrets # Namespace where the secret is stored
 status:
   phase: Ready
   status: Connected
 ```
 
-The referenced Secret should contain:
+The referenced Secret should be in the namespace specified by `secretNamespace`:
 
 ```yaml
 apiVersion: v1
 kind: Secret
 metadata:
   name: cluster-east-kubeconfig
-  namespace: kubevirt-configs
+  namespace: kubevirt-secrets # Must match spec.secretNamespace in KubevirtConfig
 type: Opaque
 data:
   kubeconfig: <base64-encoded-kubeconfig>
@@ -289,11 +292,11 @@ Set these when deploying the operator:
 
 ```yaml
 env:
-  - name: KUBEVIRT_CONFIGS_NAMESPACE
-    value: "kubevirt-configs"
   - name: DEFAULT_KUBEVIRT_CONFIG
     value: "default-cluster" # Optional
 ```
+
+> **Note:** The `KUBEVIRT_CONFIGS_NAMESPACE` environment variable is no longer needed. Each KubevirtConfig specifies its own `spec.secretNamespace`.
 
 ### Initialization Checks
 
@@ -345,10 +348,10 @@ These warnings are informational and don't block operator startup, but they help
 
 ### Namespace Setup
 
-Create a namespace for KubevirtConfig CRDs:
+Create a namespace for kubeconfig secrets:
 
 ```bash
-kubectl create namespace kubevirt-configs
+kubectl create namespace kubevirt-secrets
 ```
 
 ### Create KubevirtConfig and Secret
@@ -359,7 +362,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: cluster-east-kubeconfig
-  namespace: kubevirt-configs
+  namespace: kubevirt-secrets # Namespace for secrets
 type: Opaque
 stringData:
   kubeconfig: |
@@ -385,10 +388,11 @@ apiVersion: vitistack.io/v1alpha1
 kind: KubevirtConfig
 metadata:
   name: cluster-east
-  namespace: kubevirt-configs
+  # No namespace - cluster-scoped resource
 spec:
   name: cluster-east
   kubeconfigSecretRef: cluster-east-kubeconfig
+  secretNamespace: kubevirt-secrets # References the secret namespace
 ```
 
 ## Testing
@@ -520,21 +524,20 @@ For existing deployments migrating to this multi-cluster architecture:
    kubectl apply -f hack/vitistack-crds/vitistack.io_kubevirtconfigs.yaml
    ```
 
-2. **Create namespace for configs**
+2. **Create namespace for secrets**
 
    ```bash
-   kubectl create namespace kubevirt-configs
+   kubectl create namespace kubevirt-secrets
    ```
 
 3. **Create KubevirtConfig for existing cluster**
 
    - Extract current kubeconfig
-   - Create Secret with kubeconfig
-   - Create KubevirtConfig pointing to Secret
+   - Create Secret with kubeconfig in the secrets namespace
+   - Create cluster-scoped KubevirtConfig with `secretNamespace` pointing to the secrets namespace
 
 4. **Update operator deployment**
 
-   - Add KUBEVIRT_CONFIGS_NAMESPACE env var
    - Add DEFAULT_KUBEVIRT_CONFIG env var (optional)
    - Update RBAC to include new permissions
 
@@ -590,14 +593,14 @@ For existing deployments migrating to this multi-cluster architecture:
 ### Debug Commands
 
 ```bash
-# List KubevirtConfigs
-kubectl get kubevirtconfigs -n kubevirt-configs
+# List KubevirtConfigs (cluster-scoped, no namespace needed)
+kubectl get kubevirtconfigs
 
 # Check KubevirtConfig details
-kubectl describe kubevirtconfig <name> -n kubevirt-configs
+kubectl describe kubevirtconfig <name>
 
-# Verify Secret
-kubectl get secret <secret-name> -n kubevirt-configs -o yaml
+# Verify Secret (check the secretNamespace from the KubevirtConfig)
+kubectl get secret <secret-name> -n <secret-namespace> -o yaml
 
 # Check operator logs
 kubectl logs -n <operator-namespace> <operator-pod> -f

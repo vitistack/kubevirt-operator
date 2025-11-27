@@ -38,10 +38,7 @@ func CheckKubevirtClustersAvailable(clientMgr clients.ClientManager) {
 
 	ctx := context.TODO()
 
-	// Get KubevirtConfig namespace
-	configNamespace := clientMgr.GetConfigNamespace()
-
-	// List all KubevirtConfigs
+	// List all KubevirtConfigs (cluster-scoped)
 	configs, err := clientMgr.ListKubevirtConfigs(ctx)
 	if err != nil {
 		vlog.Error("Failed to list KubevirtConfigs", err)
@@ -49,7 +46,7 @@ func CheckKubevirtClustersAvailable(clientMgr clients.ClientManager) {
 	}
 
 	if len(configs) == 0 {
-		errorMessage := fmt.Sprintf("No KubevirtConfig resources found in namespace '%s'. Please create at least one KubevirtConfig.", configNamespace)
+		errorMessage := "No KubevirtConfig resources found. Please create at least one KubevirtConfig."
 		vlog.Error(errorMessage, nil)
 		panic(errorMessage)
 	}
@@ -162,7 +159,7 @@ func registerMachineProvider(ctx context.Context, kubeconfig *vitistackv1alpha1.
 				Type: "credentials",
 				CredentialsRef: &vitistackv1alpha1.CredentialsReference{
 					SecretName: kubeconfig.Spec.KubeconfigSecretRef,
-					Namespace:  kubeconfig.Namespace,
+					Namespace:  kubeconfig.Spec.SecretNamespace,
 				},
 			},
 		},

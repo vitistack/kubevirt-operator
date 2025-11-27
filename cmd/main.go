@@ -327,13 +327,6 @@ func setupManager(config *Configuration, metricsOpts *metricsserver.Options, web
 
 // addWatchersToManager adds the certificate watchers to the manager
 func addWatchersToManager(mgr ctrl.Manager, metricsCertWatcher, webhookCertWatcher *certwatcher.CertWatcher) {
-	// Initialize KubevirtClientManager
-	kubevirtConfigNamespace := viper.GetString(consts.KUBEVIRT_CONFIGS_NAMESPACE)
-	if kubevirtConfigNamespace == "" {
-		kubevirtConfigNamespace = "default" // fallback to default namespace
-		setupLog.Info("KUBEVIRT_CONFIGS_NAMESPACE not set, using default namespace")
-	}
-
 	// Create a direct API client (non-cached) for initialization checks
 	// The manager's cache hasn't started yet, so we need a direct client
 	directClient, err := client.New(mgr.GetConfig(), client.Options{
@@ -348,7 +341,6 @@ func addWatchersToManager(mgr ctrl.Manager, metricsCertWatcher, webhookCertWatch
 	initClientMgr := clients.NewKubevirtClientManager(
 		directClient,
 		mgr.GetScheme(),
-		kubevirtConfigNamespace,
 	)
 
 	// Check KubeVirt clusters availability using direct client
@@ -358,7 +350,6 @@ func addWatchersToManager(mgr ctrl.Manager, metricsCertWatcher, webhookCertWatch
 	kubevirtClientMgr := clients.NewKubevirtClientManager(
 		mgr.GetClient(),
 		mgr.GetScheme(),
-		kubevirtConfigNamespace,
 	)
 
 	// Setup controllers

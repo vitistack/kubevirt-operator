@@ -46,9 +46,9 @@ type ClientManager interface {
     GetClientForConfig(ctx context.Context, kubevirtConfigName string) (client.Client, error)
     GetOrCreateClientFromMachine(ctx context.Context, machine *vitistackv1alpha1.Machine) (client.Client, string, error)
 
-    // Config management
+    // Config management (KubevirtConfig is cluster-scoped)
     ListKubevirtConfigs(ctx context.Context) ([]vitistackv1alpha1.KubevirtConfig, error)
-    GetConfigNamespace() string
+    // Note: Each KubevirtConfig specifies its own spec.secretNamespace
 
     // Cache management
     InvalidateClient(kubevirtConfigName string)
@@ -82,14 +82,14 @@ type ClientManager interface {
 **Usage:**
 
 ```go
-// Create the manager
+// Create the manager (no namespace parameter needed)
 clientMgr := clients.NewKubevirtClientManager(
     supervisorClient,
     scheme,
-    "kubevirt-configs",
 )
 
 // Get a client for a specific config
+// The secret namespace is read from kubevirtConfig.Spec.SecretNamespace
 remoteClient, err := clientMgr.GetClientForConfig(ctx, "cluster-east")
 
 // Get client from machine
@@ -324,8 +324,8 @@ func NewMachineReconciler(
     }
 }
 
-// In main.go
-clientMgr := clients.NewKubevirtClientManager(c, scheme, namespace)
+// In main.go (no namespace parameter needed)
+clientMgr := clients.NewKubevirtClientManager(c, scheme)
 reconciler := v1alpha1.NewMachineReconciler(c, scheme, clientMgr)
 ```
 
@@ -355,7 +355,7 @@ func NewReconciler(clientMgr clients.ClientManager) *Reconciler {
 
 // Bad - creating dependency internally
 func NewReconciler(client client.Client, scheme *runtime.Scheme) *Reconciler {
-    clientMgr := clients.NewKubevirtClientManager(client, scheme, "default")
+    clientMgr := clients.NewKubevirtClientManager(client, scheme)
     return &Reconciler{clientMgr: clientMgr}
 }
 ```

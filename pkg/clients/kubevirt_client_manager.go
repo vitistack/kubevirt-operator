@@ -39,7 +39,6 @@ import (
 type KubevirtClientManager struct {
 	supervisorClient client.Client
 	scheme           *runtime.Scheme
-	configNamespace  string
 
 	mu      sync.RWMutex
 	clients map[string]client.Client // map[kubevirtConfigName]client
@@ -49,11 +48,10 @@ type KubevirtClientManager struct {
 var _ ClientManager = (*KubevirtClientManager)(nil)
 
 // NewKubevirtClientManager creates a new client manager
-func NewKubevirtClientManager(supervisorClient client.Client, scheme *runtime.Scheme, configNamespace string) ClientManager {
+func NewKubevirtClientManager(supervisorClient client.Client, scheme *runtime.Scheme) ClientManager {
 	return &KubevirtClientManager{
 		supervisorClient: supervisorClient,
 		scheme:           scheme,
-		configNamespace:  configNamespace,
 		clients:          make(map[string]client.Client),
 	}
 }
@@ -71,36 +69,40 @@ func (m *KubevirtClientManager) GetClientForConfig(ctx context.Context, kubevirt
 	}
 	m.mu.RUnlock()
 
-	// Fetch the KubevirtConfig CRD
+	// Fetch the KubevirtConfig CRD (cluster-scoped, no namespace)
 	kubevirtConfig := &vitistackv1alpha1.KubevirtConfig{}
 	if err := m.supervisorClient.Get(ctx, types.NamespacedName{
-		Name:      kubevirtConfigName,
-		Namespace: m.configNamespace,
+		Name: kubevirtConfigName,
 	}, kubevirtConfig); err != nil {
 		if errors.IsNotFound(err) {
-			return nil, fmt.Errorf("KubevirtConfig %s not found in namespace %s", kubevirtConfigName, m.configNamespace)
+			return nil, fmt.Errorf("KubevirtConfig %s not found", kubevirtConfigName)
 		}
 		return nil, fmt.Errorf("failed to get KubevirtConfig: %w", err)
 	}
 
-	// Get the kubeconfig secret
+	// Get the kubeconfig secret (secrets are namespaced)
 	secretName := kubevirtConfig.Spec.KubeconfigSecretRef
 	if secretName == "" {
 		return nil, fmt.Errorf("KubevirtConfig %s has no kubeconfigSecretRef", kubevirtConfigName)
 	}
 
+	secretNamespace := kubevirtConfig.Spec.SecretNamespace
+	if secretNamespace == "" {
+		return nil, fmt.Errorf("KubevirtConfig %s has no secretNamespace", kubevirtConfigName)
+	}
+
 	secret := &corev1.Secret{}
 	if err := m.supervisorClient.Get(ctx, types.NamespacedName{
 		Name:      secretName,
-		Namespace: m.configNamespace,
+		Namespace: secretNamespace,
 	}, secret); err != nil {
-		return nil, fmt.Errorf("failed to get kubeconfig secret %s: %w", secretName, err)
+		return nil, fmt.Errorf("failed to get kubeconfig secret %s/%s: %w", secretNamespace, secretName, err)
 	}
 
 	// Extract kubeconfig from secret
 	kubeconfigData, ok := secret.Data["kubeconfig"]
 	if !ok {
-		return nil, fmt.Errorf("secret %s does not contain 'kubeconfig' key", secretName)
+		return nil, fmt.Errorf("secret %s/%s does not contain 'kubeconfig' key", secretNamespace, secretName)
 	}
 
 	// Create REST config from kubeconfig
@@ -126,11 +128,12 @@ func (m *KubevirtClientManager) GetClientForConfig(ctx context.Context, kubevirt
 	return remoteClient, nil
 }
 
-// ListKubevirtConfigs returns all KubevirtConfig CRDs in the configured namespace
+// ListKubevirtConfigs returns all KubevirtConfig CRDs (cluster-scoped)
 func (m *KubevirtClientManager) ListKubevirtConfigs(ctx context.Context) ([]vitistackv1alpha1.KubevirtConfig, error) {
 	kubevirtConfigList := &vitistackv1alpha1.KubevirtConfigList{}
 
-	if err := m.supervisorClient.List(ctx, kubevirtConfigList, client.InNamespace(m.configNamespace)); err != nil {
+	// KubevirtConfig is cluster-scoped, no namespace filter needed
+	if err := m.supervisorClient.List(ctx, kubevirtConfigList); err != nil {
 		return nil, fmt.Errorf("failed to list KubevirtConfigs: %w", err)
 	}
 
@@ -149,11 +152,6 @@ func (m *KubevirtClientManager) InvalidateAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.clients = make(map[string]client.Client)
-}
-
-// GetConfigNamespace returns the namespace where KubevirtConfig CRDs are stored
-func (m *KubevirtClientManager) GetConfigNamespace() string {
-	return m.configNamespace
 }
 
 // GetSupervisorClient returns the Kubernetes client for the supervisor cluster
@@ -211,7 +209,7 @@ func (m *KubevirtClientManager) GetOrCreateClientFromMachine(ctx context.Context
 				return nil, "", false, fmt.Errorf("machine %s/%s has no KubevirtConfig reference and failed to list available configs: %w", machine.Namespace, machine.Name, err)
 			}
 			if len(configs) == 0 {
-				return nil, "", false, fmt.Errorf("machine %s/%s has no KubevirtConfig reference and no KubevirtConfigs are available in namespace %s", machine.Namespace, machine.Name, m.configNamespace)
+				return nil, "", false, fmt.Errorf("machine %s/%s has no KubevirtConfig reference and no KubevirtConfigs are available", machine.Namespace, machine.Name)
 			}
 
 			if len(configs) == 1 {
@@ -297,36 +295,40 @@ func (m *KubevirtClientManager) HealthCheck(ctx context.Context) map[string]erro
 // GetRESTConfigForConfig returns a REST config for the specified KubevirtConfig
 // This is useful for creating informers or other clients that need direct REST access
 func (m *KubevirtClientManager) GetRESTConfigForConfig(ctx context.Context, kubevirtConfigName string) (*rest.Config, error) {
-	// Fetch the KubevirtConfig CRD
+	// Fetch the KubevirtConfig CRD (cluster-scoped, no namespace)
 	kubevirtConfig := &vitistackv1alpha1.KubevirtConfig{}
 	if err := m.supervisorClient.Get(ctx, types.NamespacedName{
-		Name:      kubevirtConfigName,
-		Namespace: m.configNamespace,
+		Name: kubevirtConfigName,
 	}, kubevirtConfig); err != nil {
 		if errors.IsNotFound(err) {
-			return nil, fmt.Errorf("KubevirtConfig %s not found in namespace %s", kubevirtConfigName, m.configNamespace)
+			return nil, fmt.Errorf("KubevirtConfig %s not found", kubevirtConfigName)
 		}
 		return nil, fmt.Errorf("failed to get KubevirtConfig: %w", err)
 	}
 
-	// Get the kubeconfig secret
+	// Get the kubeconfig secret (secrets are namespaced)
 	secretName := kubevirtConfig.Spec.KubeconfigSecretRef
 	if secretName == "" {
 		return nil, fmt.Errorf("KubevirtConfig %s has no kubeconfigSecretRef", kubevirtConfigName)
 	}
 
+	secretNamespace := kubevirtConfig.Spec.SecretNamespace
+	if secretNamespace == "" {
+		return nil, fmt.Errorf("KubevirtConfig %s has no secretNamespace", kubevirtConfigName)
+	}
+
 	secret := &corev1.Secret{}
 	if err := m.supervisorClient.Get(ctx, types.NamespacedName{
 		Name:      secretName,
-		Namespace: m.configNamespace,
+		Namespace: secretNamespace,
 	}, secret); err != nil {
-		return nil, fmt.Errorf("failed to get kubeconfig secret %s: %w", secretName, err)
+		return nil, fmt.Errorf("failed to get kubeconfig secret %s/%s: %w", secretNamespace, secretName, err)
 	}
 
 	// Extract kubeconfig from secret
 	kubeconfigData, ok := secret.Data["kubeconfig"]
 	if !ok {
-		return nil, fmt.Errorf("secret %s does not contain 'kubeconfig' key", secretName)
+		return nil, fmt.Errorf("secret %s/%s does not contain 'kubeconfig' key", secretNamespace, secretName)
 	}
 
 	// Create REST config from kubeconfig

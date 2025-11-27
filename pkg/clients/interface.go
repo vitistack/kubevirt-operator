@@ -31,7 +31,7 @@ type ClientManager interface {
 	// The client is cached and reused for subsequent calls
 	GetClientForConfig(ctx context.Context, kubevirtConfigName string) (client.Client, error)
 
-	// ListKubevirtConfigs returns all KubevirtConfig CRDs in the configured namespace
+	// ListKubevirtConfigs returns all KubevirtConfig CRDs (cluster-scoped)
 	ListKubevirtConfigs(ctx context.Context) ([]vitistackv1alpha1.KubevirtConfig, error)
 
 	// InvalidateClient removes a cached client, forcing it to be recreated on next access
@@ -40,15 +40,14 @@ type ClientManager interface {
 	// InvalidateAll removes all cached clients
 	InvalidateAll()
 
-	// GetConfigNamespace returns the namespace where KubevirtConfig CRDs are stored
-	GetConfigNamespace() string
-
 	// ValidateConnection tests the connection to a KubeVirt cluster
 	ValidateConnection(ctx context.Context, kubevirtConfigName string) error
 
 	// GetOrCreateClientFromMachine gets or creates a client based on Machine's KubevirtConfig reference.
 	// Returns the client, the name of the KubevirtConfig used, and whether the annotation needs updating.
-	GetOrCreateClientFromMachine(ctx context.Context, machine *vitistackv1alpha1.Machine) (client.Client, string, bool, error) // HealthCheck performs a health check on all cached clients
+	GetOrCreateClientFromMachine(ctx context.Context, machine *vitistackv1alpha1.Machine) (client.Client, string, bool, error)
+
+	// HealthCheck performs a health check on all cached clients
 	// Returns a map of config names to errors (empty map if all healthy)
 	HealthCheck(ctx context.Context) map[string]error
 

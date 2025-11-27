@@ -20,29 +20,23 @@ func NewKubevirtConfigService(c client.Client) *KubevirtConfigService {
 	}
 }
 
-// FetchAllKubevirtConfigs returns all KubevirtConfig resources in the configured namespace
+// FetchAllKubevirtConfigs returns all KubevirtConfig resources (cluster-scoped)
 func (s *KubevirtConfigService) FetchAllKubevirtConfigs(ctx context.Context, namespace string) ([]vitistackv1alpha1.KubevirtConfig, error) {
 	kubevirtConfigList := &vitistackv1alpha1.KubevirtConfigList{}
 
-	listOpts := []client.ListOption{}
-	if namespace != "" {
-		listOpts = append(listOpts, client.InNamespace(namespace))
-	}
-
-	if err := s.client.List(ctx, kubevirtConfigList, listOpts...); err != nil {
+	if err := s.client.List(ctx, kubevirtConfigList); err != nil {
 		return nil, fmt.Errorf("failed to list KubevirtConfigs: %w", err)
 	}
 
 	return kubevirtConfigList.Items, nil
 }
 
-// FetchKubevirtConfigByName returns a specific KubevirtConfig by name
+// FetchKubevirtConfigByName returns a specific KubevirtConfig by name (cluster-scoped)
 func (s *KubevirtConfigService) FetchKubevirtConfigByName(ctx context.Context, name string, namespace string) (*vitistackv1alpha1.KubevirtConfig, error) {
 	kubevirtConfig := &vitistackv1alpha1.KubevirtConfig{}
 
 	key := client.ObjectKey{
-		Name:      name,
-		Namespace: namespace,
+		Name: name,
 	}
 
 	if err := s.client.Get(ctx, key, kubevirtConfig); err != nil {

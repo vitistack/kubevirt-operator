@@ -149,7 +149,7 @@ spec:
 ### Example 5: No Configs Available
 
 ```yaml
-# No KubevirtConfigs exist in the namespace
+# No KubevirtConfigs exist
 apiVersion: vitistack.io/v1alpha1
 kind: Machine
 metadata:
@@ -160,7 +160,7 @@ spec:
 
 **Result:**
 
-- Error: "machine default/broken-vm has no KubevirtConfig reference and no KubevirtConfigs are available in namespace kubevirt-configs"
+- Error: "machine default/broken-vm has no KubevirtConfig reference and no KubevirtConfigs are available"
 - Machine enters error state
 - Event recorded on Machine object
 
@@ -183,8 +183,6 @@ spec:
           env:
             - name: DEFAULT_KUBEVIRT_CONFIG
               value: "production-cluster"
-            - name: KUBEVIRT_CONFIGS_NAMESPACE
-              value: "kubevirt-configs"
 ```
 
 Or using Viper configuration file:
@@ -192,23 +190,22 @@ Or using Viper configuration file:
 ```yaml
 # config.yaml
 DEFAULT_KUBEVIRT_CONFIG: production-cluster
-KUBEVIRT_CONFIGS_NAMESPACE: kubevirt-configs
 ```
 
 ### Creating KubevirtConfigs
 
-Ensure at least one KubevirtConfig exists:
+Ensure at least one KubevirtConfig exists (cluster-scoped resource):
 
 ```yaml
 apiVersion: vitistack.io/v1alpha1
 kind: KubevirtConfig
 metadata:
   name: cluster-east
-  namespace: kubevirt-configs
+  # No namespace - cluster-scoped resource
 spec:
   name: cluster-east
   kubeconfigSecretRef: cluster-east-kubeconfig
-  endpoint: https://cluster-east.example.com:6443
+  secretNamespace: kubevirt-secrets # Namespace where the secret is stored
 status:
   phase: Ready
   status: Connected
@@ -462,7 +459,7 @@ If you have existing Machines with annotations:
 
 1. Check if annotation exists: `kubectl get machine <name> -o jsonpath='{.metadata.annotations}'`
 2. Check if DEFAULT_KUBEVIRT_CONFIG is set: `kubectl get deployment kubevirt-operator -o yaml | grep DEFAULT_KUBEVIRT_CONFIG`
-3. Check available configs: `kubectl get kubevirtconfig -n kubevirt-configs`
+3. Check available configs: `kubectl get kubevirtconfig` (cluster-scoped, no namespace needed)
 4. Add explicit annotation to override automatic selection
 
 ### No KubevirtConfigs Available Error
@@ -471,9 +468,9 @@ If you have existing Machines with annotations:
 
 **Solutions:**
 
-1. Create at least one KubevirtConfig in the namespace
-2. Verify KUBEVIRT_CONFIGS_NAMESPACE matches where configs are created
-3. Check operator has RBAC permissions to list KubevirtConfigs
+1. Create at least one KubevirtConfig (cluster-scoped)
+2. Check operator has RBAC permissions to list KubevirtConfigs
+3. Verify KubevirtConfig has valid `spec.secretNamespace` pointing to a namespace with the kubeconfig secret
 
 ### Annotation Not Being Added
 

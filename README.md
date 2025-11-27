@@ -54,8 +54,9 @@ The operator can be configured using environment variables:
 ### Operator Configuration
 
 - **`MANAGED_BY`**: Label value for managed resources (default: `kubevirt-operator`)
-- **`KUBEVIRT_CONFIGS_NAMESPACE`**: Namespace where KubevirtConfig resources are stored
 - **`DEFAULT_KUBEVIRT_CONFIG`**: Name of the default KubevirtConfig to use
+
+> **Note:** KubevirtConfig is a cluster-scoped resource. Each KubevirtConfig specifies its own `spec.secretNamespace` where the kubeconfig secret is stored.
 
 ### Logging Configuration
 

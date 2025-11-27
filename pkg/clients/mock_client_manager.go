@@ -33,9 +33,6 @@ type MockClientManager struct {
 	// MockedConfigs stores KubevirtConfig objects
 	MockedConfigs []vitistackv1alpha1.KubevirtConfig
 
-	// ConfigNamespace is the namespace where configs are stored
-	ConfigNamespace string
-
 	// SupervisorClient is the client for the supervisor cluster
 	SupervisorClient client.Client
 
@@ -63,9 +60,8 @@ var _ ClientManager = (*MockClientManager)(nil)
 // NewMockClientManager creates a new mock client manager for testing
 func NewMockClientManager() *MockClientManager {
 	return &MockClientManager{
-		MockedClients:   make(map[string]client.Client),
-		MockedConfigs:   []vitistackv1alpha1.KubevirtConfig{},
-		ConfigNamespace: "default",
+		MockedClients: make(map[string]client.Client),
+		MockedConfigs: []vitistackv1alpha1.KubevirtConfig{},
 	}
 }
 
@@ -106,11 +102,6 @@ func (m *MockClientManager) InvalidateClient(kubevirtConfigName string) {
 // InvalidateAll clears all mocked clients
 func (m *MockClientManager) InvalidateAll() {
 	m.MockedClients = make(map[string]client.Client)
-}
-
-// GetConfigNamespace returns the mocked namespace
-func (m *MockClientManager) GetConfigNamespace() string {
-	return m.ConfigNamespace
 }
 
 // GetSupervisorClient returns the mocked supervisor client

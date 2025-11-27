@@ -12,13 +12,14 @@ type ClientManager interface {
     ListKubevirtConfigs(ctx context.Context) ([]vitistackv1alpha1.KubevirtConfig, error)
     InvalidateClient(kubevirtConfigName string)
     InvalidateAll()
-    GetConfigNamespace() string
     ValidateConnection(ctx context.Context, kubevirtConfigName string) error
     GetOrCreateClientFromMachine(ctx context.Context, machine *vitistackv1alpha1.Machine) (client.Client, string, error)
     HealthCheck(ctx context.Context) map[string]error
     GetRESTConfigForConfig(ctx context.Context, kubevirtConfigName string) (*rest.Config, error)
 }
 ```
+
+> **Note:** KubevirtConfig is cluster-scoped. Each KubevirtConfig specifies its own `spec.secretNamespace` where the kubeconfig secret is stored.
 
 ## Implementations
 
@@ -36,13 +37,14 @@ The production implementation that:
 ```go
 import "github.com/vitistack/kubevirt-operator/pkg/clients"
 
+// Create manager (no namespace parameter needed)
 clientMgr := clients.NewKubevirtClientManager(
     supervisorClient,
     scheme,
-    "kubevirt-configs",
 )
 
 // Get a client for a specific config
+// The secret namespace is read from kubevirtConfig.Spec.SecretNamespace
 remoteClient, err := clientMgr.GetClientForConfig(ctx, "cluster-east")
 
 // Get client from machine - automatically assigns config if not set
@@ -80,15 +82,16 @@ mockMgr := clients.NewMockClientManager()
 // Add a mocked client
 mockMgr.AddMockedClient("test-cluster", fakeClient)
 
-// Add a mocked config
+// Add a mocked config (cluster-scoped)
 mockMgr.AddMockedConfig(vitistackv1alpha1.KubevirtConfig{
     ObjectMeta: metav1.ObjectMeta{
         Name: "test-cluster",
-        Namespace: "kubevirt-configs",
+        // No namespace - cluster-scoped
     },
     Spec: vitistackv1alpha1.KubevirtConfigSpec{
         Name: "test-cluster",
         KubeconfigSecretRef: "test-secret",
+        SecretNamespace: "kubevirt-secrets", // Secret location
     },
 })
 
