@@ -22,6 +22,7 @@ func Init() {
 		cpuModel = "host-passthrough"
 	}
 
+	viper.SetDefault(consts.DEVELOPMENT, false)
 	viper.SetDefault(consts.CPU_MODEL, cpuModel)
 	viper.SetDefault(consts.CNI_VERSION, "1.0.0")
 	viper.SetDefault(consts.LOG_JSON, true)

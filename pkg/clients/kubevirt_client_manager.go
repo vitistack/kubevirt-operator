@@ -130,13 +130,6 @@ func (m *KubevirtClientManager) GetClientForConfig(ctx context.Context, kubevirt
 func (m *KubevirtClientManager) ListKubevirtConfigs(ctx context.Context) ([]vitistackv1alpha1.KubevirtConfig, error) {
 	kubevirtConfigList := &vitistackv1alpha1.KubevirtConfigList{}
 
-	// Ensure the GVK is set for the List operation
-	// gvk := kubevirtConfigList.GroupVersionKind()
-	// if gvk.Empty() {
-	// 	// If GVK is not set on the type, set it explicitly
-	// 	kubevirtConfigList.SetGroupVersionKind(vitistackv1alpha1.GroupVersion.WithKind("KubevirtConfigList"))
-	// }
-
 	if err := m.supervisorClient.List(ctx, kubevirtConfigList, client.InNamespace(m.configNamespace)); err != nil {
 		return nil, fmt.Errorf("failed to list KubevirtConfigs: %w", err)
 	}

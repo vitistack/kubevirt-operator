@@ -212,8 +212,8 @@ func (m *NetworkManager) createNetworkAttachmentDefinition(ctx context.Context, 
 			Name:      name,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"managed-by": viper.GetString(consts.MANAGED_BY),
-				"vlan-id":    fmt.Sprintf("%d", vlanId),
+				vitistackv1alpha1.ManagedByAnnotation: viper.GetString(consts.MANAGED_BY),
+				"vitistack.io/vlan-id":                fmt.Sprintf("%d", vlanId),
 			},
 		},
 		Spec: netattdefv1.NetworkAttachmentDefinitionSpec{
@@ -425,7 +425,7 @@ func (m *NetworkManager) CleanupOrphanedNADs(ctx context.Context, namespace stri
 	nadList := &netattdefv1.NetworkAttachmentDefinitionList{}
 	if err := remoteClient.List(ctx, nadList,
 		client.InNamespace(namespace),
-		client.MatchingLabels{"managed-by": managedBy}); err != nil {
+		client.MatchingLabels{vitistackv1alpha1.ManagedByAnnotation: managedBy}); err != nil {
 		return fmt.Errorf("failed to list NetworkAttachmentDefinitions: %w", err)
 	}
 

@@ -26,7 +26,6 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -178,7 +177,7 @@ func (r *MachineReconciler) ensureNamespaceExists(ctx context.Context, namespace
 		ObjectMeta: metav1.ObjectMeta{
 			Name: namespaceName,
 			Labels: map[string]string{
-				"managed-by": viper.GetString(consts.MANAGED_BY),
+				vitistackv1alpha1.ManagedByAnnotation: viper.GetString(consts.MANAGED_BY),
 			},
 		},
 	}
@@ -593,20 +592,20 @@ func (r *MachineReconciler) extractNADNameFromVM(virtualMachine *kubevirtv1.Virt
 // isKubevirtProvider returns true if the Machine's provider is kubevirt.
 // If providerConfig.name is empty or not set, we treat it as kubevirt for backward compatibility.
 func (r *MachineReconciler) isKubevirtProvider(machine *vitistackv1alpha1.Machine) bool {
-	name := r.getProviderName(machine)
-	if name == "" {
+	provider := r.getProviderName(machine)
+	if provider == "" {
 		return true
 	}
-	return strings.EqualFold(name, "kubevirt")
+	return provider == vitistackv1alpha1.MachineProviderTypeKubevirt
 }
 
 // getProviderName extracts spec.providerConfig.name if available; otherwise returns empty string.
-func (r *MachineReconciler) getProviderName(machine *vitistackv1alpha1.Machine) string {
+func (r *MachineReconciler) getProviderName(machine *vitistackv1alpha1.Machine) vitistackv1alpha1.MachineProviderType {
 	if machine == nil {
 		return ""
 	}
 	// ProviderConfig is a value type (CloudProviderConfig); zero value has empty Name
-	return strings.TrimSpace(machine.Spec.Provider)
+	return machine.Spec.Provider
 }
 
 // NewMachineReconciler creates a new MachineReconciler with initialized managers

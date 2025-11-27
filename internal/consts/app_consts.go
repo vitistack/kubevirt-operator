@@ -1,6 +1,7 @@
 package consts
 
 const (
+	DEVELOPMENT                = "DEVELOPMENT"
 	NAMESPACE                  = "default"
 	CPU_MODEL                  = "CPU_MODEL"
 	CNI_VERSION                = "CNI_VERSION"

@@ -117,8 +117,8 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 			Name:      vmName,
 			Namespace: machine.Namespace,
 			Labels: map[string]string{
-				"managed-by":     viper.GetString(consts.MANAGED_BY),
-				"source-machine": machine.Name,
+				vitistackv1alpha1.ManagedByAnnotation: viper.GetString(consts.MANAGED_BY),
+				"vitistack.io/source-machine":         machine.Name,
 			},
 		},
 		Spec: kubevirtv1.VirtualMachineSpec{
@@ -128,8 +128,8 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 			Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"managed-by":     viper.GetString(consts.MANAGED_BY),
-						"source-machine": machine.Name,
+						vitistackv1alpha1.ManagedByAnnotation: viper.GetString(consts.MANAGED_BY),
+						"vitistack.io/source-machine":         machine.Name,
 					},
 				},
 				Spec: kubevirtv1.VirtualMachineInstanceSpec{
@@ -395,8 +395,8 @@ func (m *VMManager) buildDataVolumeTemplates(machine *vitistackv1alpha1.Machine,
 		ObjectMeta: metav1.ObjectMeta{
 			Name: vmName + "-iso",
 			Labels: map[string]string{
-				"managed-by":     viper.GetString(consts.MANAGED_BY),
-				"source-machine": machine.Name,
+				vitistackv1alpha1.ManagedByAnnotation: viper.GetString(consts.MANAGED_BY),
+				"vitistack.io/source-machine":         machine.Name,
 			},
 		},
 		Spec: cdiv1.DataVolumeSpec{
@@ -496,8 +496,8 @@ func (m *VMManager) persistMacAddressesToNetworkConfiguration(ctx context.Contex
 				Name:      machine.Name,
 				Namespace: machine.Namespace,
 				Labels: map[string]string{
-					"managed-by":     viper.GetString(consts.MANAGED_BY),
-					"source-machine": machine.Name,
+					vitistackv1alpha1.ManagedByAnnotation: viper.GetString(consts.MANAGED_BY),
+					"vitistack.io/source-machine":         machine.Name,
 				},
 			},
 			Spec: vitistackv1alpha1.NetworkConfigurationSpec{
@@ -568,17 +568,17 @@ func (m *VMManager) CleanupNetworkConfiguration(ctx context.Context, machine *vi
 	// Validate labels match expected values
 	labels := netConfig.GetLabels()
 	expectedManagedBy := viper.GetString(consts.MANAGED_BY)
-	if managedBy, ok := labels["managed-by"]; !ok || managedBy != expectedManagedBy {
+	if managedBy, ok := labels[vitistackv1alpha1.ManagedByAnnotation]; !ok || managedBy != expectedManagedBy {
 		logger.Info("NetworkConfiguration has unexpected managed-by label, skipping deletion",
 			"name", machine.Name,
-			"managed-by", managedBy)
+			vitistackv1alpha1.ManagedByAnnotation, managedBy)
 		return fmt.Errorf("NetworkConfiguration managed-by label mismatch: expected '%s', got '%s'", expectedManagedBy, managedBy)
 	}
 
-	if sourceMachine, ok := labels["source-machine"]; !ok || sourceMachine != machine.Name {
+	if sourceMachine, ok := labels["vitistack.io/source-machine"]; !ok || sourceMachine != machine.Name {
 		logger.Info("NetworkConfiguration has unexpected source-machine label, skipping deletion",
 			"name", machine.Name,
-			"source-machine", sourceMachine,
+			"vitistack.io/source-machine", sourceMachine,
 			"expected", machine.Name)
 		return fmt.Errorf("NetworkConfiguration source-machine label mismatch: expected '%s', got '%s'", machine.Name, sourceMachine)
 	}

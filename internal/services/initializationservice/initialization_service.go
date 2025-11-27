@@ -7,9 +7,12 @@ import (
 
 	"github.com/vitistack/common/pkg/loggers/vlog"
 	"github.com/vitistack/common/pkg/operator/crdcheck"
+	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
+	"github.com/vitistack/kubevirt-operator/internal/services"
 	"github.com/vitistack/kubevirt-operator/internal/services/crdvalidation"
 	"github.com/vitistack/kubevirt-operator/internal/services/kubevirtvalidation"
 	"github.com/vitistack/kubevirt-operator/pkg/clients"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func CheckPrerequisites() {
@@ -66,4 +69,71 @@ func CheckKubevirtClustersAvailable(clientMgr clients.ClientManager) {
 	crdvalidation.CheckCRDCompatibility(ctx, clientMgr, configs)
 
 	vlog.Info("✅ All KubeVirt clusters are available and ready")
+}
+
+// register machine provider crd if no objects exist
+func RegisterMachineProviderCRDIfNeeded(namespace string) error {
+	ctx := context.TODO()
+
+	// list all MachineProvider objects
+	kubeconfigs, err := services.KubevirtConfigService.FetchAllKubevirtConfigs(ctx, namespace)
+	if err != nil {
+		return fmt.Errorf("failed to list KubevirtConfig objects: %w", err)
+	}
+	vlog.Debug("Kubeconfigs", kubeconfigs)
+
+	machineProviders, err := services.MachineProviderService.FetchAllMachineProviders(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list MachineProvider objects: %w", err)
+	}
+
+	vlog.Debug("MachineProviders", machineProviders)
+
+	for i := range kubeconfigs {
+		kubeconfig := kubeconfigs[i]
+		found := false
+		for j := range machineProviders {
+			machineProvider := machineProviders[j]
+			// MachineProvider is cluster-scoped (no namespace), so only compare by name
+			if machineProvider.Name == kubeconfig.Name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			vlog.Info("No MachineProvider found for KubevirtConfig " + kubeconfig.Name + ", registering CRD")
+			err := registerMachineProvider(ctx, &kubeconfig)
+			if err != nil {
+				return fmt.Errorf("failed to register MachineProvider CRD: %w", err)
+			}
+			vlog.Info("MachineProvider CRD registered successfully")
+		}
+	}
+	return nil
+}
+
+func registerMachineProvider(ctx context.Context, kubeconfig *vitistackv1alpha1.KubevirtConfig) error {
+	// Create a MachineProvider object for the KubevirtConfig
+	machineProvider := &vitistackv1alpha1.MachineProvider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: kubeconfig.Name,
+			Labels: map[string]string{
+				"vitistack.io/kubevirt-config": kubeconfig.Name,
+			},
+		},
+		Spec: vitistackv1alpha1.MachineProviderSpec{
+			DisplayName:  kubeconfig.Name,
+			ProviderType: string(vitistackv1alpha1.MachineProviderTypeKubevirt),
+			Region:       "default",
+			Authentication: vitistackv1alpha1.ProviderAuthentication{
+				Type: "credentials",
+				CredentialsRef: &vitistackv1alpha1.CredentialsReference{
+					SecretName: kubeconfig.Spec.KubeconfigSecretRef,
+					Namespace:  kubeconfig.Namespace,
+				},
+			},
+		},
+	}
+
+	return services.MachineProviderService.CreateMachineProvider(ctx, machineProvider)
 }

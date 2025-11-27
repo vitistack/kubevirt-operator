@@ -369,7 +369,7 @@ func findMatchingPod(podList *corev1.PodList, machineName string) *corev1.Pod {
 		if pod.Labels == nil {
 			continue
 		}
-		if value, ok := pod.Labels["source-machine"]; ok && value == machineName {
+		if value, ok := pod.Labels["vitistack.io/source-machine"]; ok && value == machineName {
 			return pod
 		}
 	}

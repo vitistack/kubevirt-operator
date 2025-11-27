@@ -31,6 +31,7 @@ import (
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/controllers/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/internal/consts"
+	"github.com/vitistack/kubevirt-operator/internal/services"
 	"github.com/vitistack/kubevirt-operator/internal/services/initializationservice"
 	"github.com/vitistack/kubevirt-operator/internal/settings"
 	"github.com/vitistack/kubevirt-operator/pkg/clients"
@@ -88,7 +89,7 @@ func main() {
 	// Parse command line flags
 	config := parseFlags()
 
-	// Initialize clients and check prerequisites
+	// Initialize k8sclient
 	k8sclient.Init()
 	initializationservice.CheckPrerequisites()
 
@@ -103,6 +104,25 @@ func main() {
 
 	// Create and configure the manager
 	mgr := setupManager(config, &metricsOpts, webhookServer)
+
+	// Create a direct API client (non-cached) for initialization
+	// The manager's cache hasn't started yet, so we need a direct client
+	directClient, err := client.New(mgr.GetConfig(), client.Options{
+		Scheme: mgr.GetScheme(),
+	})
+	if err != nil {
+		setupLog.Error(err, "failed to create direct API client for services initialization")
+		os.Exit(1)
+	}
+
+	// Initialize services with the direct client (not cached)
+	services.InitializeServices(directClient)
+
+	err = initializationservice.RegisterMachineProviderCRDIfNeeded("") // default namespace for now, todo
+	if err != nil {
+		setupLog.Error(err, "failed to register MachineProvider CRD if needed")
+		os.Exit(1)
+	}
 
 	// Add certificate watchers to the manager
 	addWatchersToManager(mgr, metricsCertWatcher, webhookCertWatcher)
@@ -138,7 +158,7 @@ func parseFlags() *Configuration {
 
 	// Configure zap logger
 	opts := zap.Options{
-		Development: true,
+		Development: viper.GetBool(consts.DEVELOPMENT),
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()

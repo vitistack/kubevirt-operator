@@ -144,8 +144,8 @@ func (m *StorageManager) createSinglePVC(ctx context.Context, machine *vitistack
 	}
 
 	labels := map[string]string{
-		"managed-by":     viper.GetString(consts.MANAGED_BY),
-		"source-machine": machine.Name,
+		vitistackv1alpha1.ManagedByAnnotation: viper.GetString(consts.MANAGED_BY),
+		"vitistack.io/source-machine":         machine.Name,
 	}
 
 	if isBoot {
@@ -214,8 +214,8 @@ func (m *StorageManager) DeleteAssociatedPVCs(ctx context.Context, machine *viti
 	listOpts := []client.ListOption{
 		client.InNamespace(machine.Namespace),
 		client.MatchingLabels{
-			"managed-by":     viper.GetString(consts.MANAGED_BY),
-			"source-machine": machine.Name,
+			vitistackv1alpha1.ManagedByAnnotation: viper.GetString(consts.MANAGED_BY),
+			"vitistack.io/source-machine":         machine.Name,
 		},
 	}
 
@@ -227,8 +227,8 @@ func (m *StorageManager) DeleteAssociatedPVCs(ctx context.Context, machine *viti
 	logger.Info("Found PVCs to delete",
 		"count", len(pvcList.Items),
 		"namespace", machine.Namespace,
-		"managed-by", viper.GetString(consts.MANAGED_BY),
-		"source-machine", machine.Name)
+		vitistackv1alpha1.ManagedByAnnotation, viper.GetString(consts.MANAGED_BY),
+		"vitistack.io/source-machine", machine.Name)
 
 	// Delete each PVC (index loop to avoid copying large structs each iteration)
 	for i := range pvcList.Items {
