@@ -39,6 +39,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+var (
+	// RequeueDelay defines how long to wait before requeuing for status updates
+	RequeueDelay = 5 * time.Second
+)
+
 // StatusManager handles machine status updates and monitoring
 type StatusManager struct {
 	client.Client
@@ -121,7 +126,7 @@ func (m *StatusManager) UpdateMachineStatusFromVMAndVMI(ctx context.Context, mac
 		return ctrl.Result{}, err
 	}
 	if requeue {
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: RequeueDelay}, nil
 	}
 	return ctrl.Result{}, nil
 }

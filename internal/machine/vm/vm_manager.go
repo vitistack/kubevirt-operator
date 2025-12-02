@@ -19,6 +19,7 @@ package vm
 import (
 	"context"
 	"fmt"
+	"math"
 	"regexp"
 
 	"github.com/spf13/viper"
@@ -31,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -81,7 +83,7 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 	}
 
 	// Calculate resource requirements
-	memoryRequest, cpuRequest := m.calculateResourceRequirements(machine)
+	memoryRequest, coresRequest, socketsRequest, threadsRequest := m.calculateResourceRequirements(machine)
 
 	networkConfiguration, netErr := m.NetworkManager.GetOrCreateNetworkConfiguration(ctx, machine, m.remoteClient)
 	if netErr != nil {
@@ -134,14 +136,19 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 				},
 				Spec: kubevirtv1.VirtualMachineInstanceSpec{
 					Domain: kubevirtv1.DomainSpec{
-						Resources: kubevirtv1.ResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceMemory: resource.MustParse(memoryRequest),
-								corev1.ResourceCPU:    resource.MustParse(cpuRequest),
-							},
-						},
+						// Resources: kubevirtv1.ResourceRequirements{
+						// 	Requests: corev1.ResourceList{
+						// 		corev1.ResourceMemory: resource.MustParse(memoryRequest),
+						// 	},
+						// },
 						CPU: &kubevirtv1.CPU{
-							Model: cpuModel,
+							Model:   cpuModel,
+							Cores:   coresRequest,
+							Sockets: socketsRequest,
+							Threads: threadsRequest,
+						},
+						Memory: &kubevirtv1.Memory{
+							Guest: ptr.To(resource.MustParse(memoryRequest)),
 						},
 						Devices: kubevirtv1.Devices{
 							Disks: disks,
@@ -207,40 +214,95 @@ func (m *VMManager) recordNetworkFailure(ctx context.Context, machine *vitistack
 	}
 }
 
-// calculateResourceRequirements determines CPU and memory requirements based on machine spec
-func (m *VMManager) calculateResourceRequirements(machine *vitistackv1alpha1.Machine) (memoryRequest, cpuRequest string) {
-	// Default resource values based on machine spec
-	oneGi := "1Gi"
-	memoryRequest = oneGi
-	cpuRequest = "1"
-
-	// Use simple defaults based on machine type from the external CRD
-	if machine.Spec.InstanceType != "" {
-		switch machine.Spec.InstanceType {
-		case "small":
-			memoryRequest = oneGi
-			cpuRequest = "1"
-		case "medium":
-			memoryRequest = "2Gi"
-			cpuRequest = "2"
-		case "large":
-			memoryRequest = "4Gi"
-			cpuRequest = "4"
-		default:
-			memoryRequest = oneGi
-			cpuRequest = "1"
-		}
+// safeIntToUint32 safely converts an int to uint32, returning the default value
+// if the input is negative or exceeds uint32 max value
+func safeIntToUint32(val int, defaultVal uint32) uint32 {
+	if val <= 0 || val > math.MaxUint32 {
+		return defaultVal
 	}
+	return uint32(val) // #nosec G115 -- bounds checked above
+}
+
+// instanceTypePreset defines the resource configuration for a machine instance type
+// TODO: Replace with custom InstanceType CRD
+type instanceTypePreset struct {
+	Memory  string
+	Cores   uint32
+	Sockets uint32
+	Threads uint32
+}
+
+// instanceTypePresets contains predefined resource configurations
+// TODO: Move to a configurable CRD (e.g., InstanceType or MachineClass)
+var instanceTypePresets = map[string]instanceTypePreset{
+	"small": {
+		Memory:  "2Gi",
+		Cores:   2,
+		Sockets: 1,
+		Threads: 1,
+	},
+	"medium": {
+		Memory:  "4Gi",
+		Cores:   4,
+		Sockets: 1,
+		Threads: 1,
+	},
+	"large": {
+		Memory:  "8Gi",
+		Cores:   8,
+		Sockets: 1,
+		Threads: 1,
+	},
+	"xlarge": {
+		Memory:  "16Gi",
+		Cores:   16,
+		Sockets: 2,
+		Threads: 1,
+	},
+}
+
+// defaultInstanceTypePreset is used when no instance type is specified or unknown
+var defaultInstanceTypePreset = instanceTypePreset{
+	Memory:  "1Gi",
+	Cores:   2,
+	Sockets: 1,
+	Threads: 1,
+}
+
+// calculateResourceRequirements determines CPU and memory requirements based on machine spec
+func (m *VMManager) calculateResourceRequirements(machine *vitistackv1alpha1.Machine) (
+	memoryRequest string,
+	coresRequest uint32,
+	socketsRequest uint32,
+	threadsRequest uint32) {
+
+	// Get preset based on instance type, or use default
+	preset, exists := instanceTypePresets[machine.Spec.InstanceType]
+	if !exists {
+		preset = defaultInstanceTypePreset
+	}
+
+	// Start with preset values
+	memoryRequest = preset.Memory
+	coresRequest = preset.Cores
+	socketsRequest = preset.Sockets
+	threadsRequest = preset.Threads
 
 	// Override with spec values if provided
 	if machine.Spec.Memory > 0 {
 		memoryRequest = fmt.Sprintf("%dMi", machine.Spec.Memory/1024/1024) // Convert bytes to MiB
 	}
 	if machine.Spec.CPU.Cores > 0 {
-		cpuRequest = fmt.Sprintf("%d", machine.Spec.CPU.Cores)
+		coresRequest = safeIntToUint32(machine.Spec.CPU.Cores, coresRequest)
+	}
+	if machine.Spec.CPU.Sockets > 0 {
+		socketsRequest = safeIntToUint32(machine.Spec.CPU.Sockets, socketsRequest)
+	}
+	if machine.Spec.CPU.ThreadsPerCore > 0 {
+		threadsRequest = safeIntToUint32(machine.Spec.CPU.ThreadsPerCore, threadsRequest)
 	}
 
-	return memoryRequest, cpuRequest
+	return memoryRequest, coresRequest, socketsRequest, threadsRequest
 }
 
 // buildDisksAndVolumes creates disk and volume specifications for the VM

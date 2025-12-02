@@ -67,6 +67,7 @@ type MachineReconciler struct {
 
 const (
 	MachineFinalizer = "machine.vitistack.io/finalizer"
+	RequeueDelay     = 5 * time.Second
 )
 
 // +kubebuilder:rbac:groups=vitistack.io,resources=machines,verbs=get;list;watch;create;update;patch;delete
@@ -101,7 +102,7 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err != nil {
 		logger.Error(err, "Failed to get KubeVirt client for machine")
 		r.recordKubevirtConfigFailure(ctx, machine, err)
-		return ctrl.Result{RequeueAfter: time.Minute}, err
+		return ctrl.Result{RequeueAfter: RequeueDelay}, err
 	}
 
 	// Set the remote client in VMManager for VM operations
@@ -110,7 +111,7 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Ensure the namespace exists on the remote KubeVirt cluster
 	if err := r.ensureNamespaceExists(ctx, machine.Namespace, remoteClient); err != nil {
 		logger.Error(err, "Failed to ensure namespace exists on remote cluster")
-		return ctrl.Result{RequeueAfter: time.Minute}, err
+		return ctrl.Result{RequeueAfter: RequeueDelay}, err
 	}
 
 	// Update machine annotations with kubevirt config reference if needed
@@ -149,7 +150,7 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// Always requeue after 15 seconds to keep status fresh for dependent operators
 	if result.RequeueAfter == 0 {
-		result.RequeueAfter = 15 * time.Second
+		result.RequeueAfter = RequeueDelay
 	}
 
 	return result, err
@@ -284,13 +285,13 @@ func (r *MachineReconciler) ensureVirtualMachine(ctx context.Context, machine *v
 		if pvcErr != nil {
 			logger.Error(pvcErr, "Failed to create PVCs")
 			_ = r.StatusManager.UpdateMachineStatus(ctx, machine, "Failed")
-			return nil, vmName, ctrl.Result{RequeueAfter: time.Minute}, true, pvcErr
+			return nil, vmName, ctrl.Result{RequeueAfter: RequeueDelay}, true, pvcErr
 		}
 		newVM, vmErr := r.VMManager.CreateVirtualMachine(ctx, machine, vmName, pvcNames)
 		if vmErr != nil {
 			logger.Error(vmErr, "Failed to create VirtualMachine in remote cluster")
 			_ = r.StatusManager.UpdateMachineStatus(ctx, machine, "Failed")
-			return nil, vmName, ctrl.Result{RequeueAfter: time.Minute}, true, vmErr
+			return nil, vmName, ctrl.Result{RequeueAfter: RequeueDelay}, true, vmErr
 		}
 		logger.Info("Created VirtualMachine in remote cluster", "virtualmachine", newVM.Name)
 		return newVM, vmName, ctrl.Result{}, false, nil
@@ -331,7 +332,7 @@ func (r *MachineReconciler) handleDeletion(ctx context.Context, machine *vitista
 		logger.Error(err, "Failed to get KubeVirt client for deletion")
 		// Cannot proceed without remote client - PVCs and VM are on remote cluster
 		// Requeue to retry the deletion
-		return ctrl.Result{RequeueAfter: time.Minute}, err
+		return ctrl.Result{RequeueAfter: RequeueDelay}, err
 	}
 
 	logger.Info("Remote client obtained, starting cleanup of remote resources")
