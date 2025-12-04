@@ -1,0 +1,129 @@
+---
+# MachineClass defines VM resource presets for the KubeVirt operator
+# MachineClasses are cluster-scoped resources that define CPU, memory, and other
+# resource configurations that can be referenced by Machine resources.
+
+# Small MachineClass - for lightweight workloads
+apiVersion: vitistack.io/v1alpha1
+kind: MachineClass
+metadata:
+  name: small
+spec:
+  enabled: true
+  default: false
+  category: "Standard"
+  displayName: "Small"
+  description: "Small instance with 2 cores and 8Gi memory"
+  cpu:
+    cores: 2
+    sockets: 1
+    threads: 1
+  memory:
+    quantity: "8Gi"
+  machineProviders:
+    - kubevirt
+
+---
+# Medium MachineClass - for general purpose workloads (default)
+apiVersion: vitistack.io/v1alpha1
+kind: MachineClass
+metadata:
+  name: medium
+spec:
+  enabled: true
+  default: true # This is the default MachineClass
+  category: "Standard"
+  displayName: "Medium"
+  description: "Medium instance with 4 cores and 16Gi memory"
+  cpu:
+    cores: 4
+    sockets: 1
+    threads: 1
+  memory:
+    quantity: "16Gi"
+  machineProviders:
+    - kubevirt
+
+---
+# Large MachineClass - for compute-intensive workloads
+apiVersion: vitistack.io/v1alpha1
+kind: MachineClass
+metadata:
+  name: large
+spec:
+  enabled: true
+  default: false
+  category: "Standard"
+  displayName: "Large"
+  description: "Large instance with 4 cores and 32Gi memory"
+  cpu:
+    cores: 4
+    sockets: 1
+    threads: 1
+  memory:
+    quantity: "32Gi"
+  machineProviders:
+    - kubevirt
+
+---
+# XLarge MachineClass - for memory-intensive workloads
+apiVersion: vitistack.io/v1alpha1
+kind: MachineClass
+metadata:
+  name: xlarge
+spec:
+  enabled: true
+  default: false
+  category: "Memory"
+  displayName: "Extra Large"
+  description: "Extra large instance with 4 cores and 48Gi memory"
+  cpu:
+    cores: 4
+    sockets: 1
+    threads: 1
+  memory:
+    quantity: "48Gi"
+  machineProviders:
+    - kubevirt
+
+---
+# Large Memory MachineClass - for high-memory workloads
+apiVersion: vitistack.io/v1alpha1
+kind: MachineClass
+metadata:
+  name: largememory
+spec:
+  enabled: true
+  default: false
+  category: "Memory"
+  displayName: "Large Memory"
+  description: "Large memory instance with 4 cores and 64Gi memory"
+  cpu:
+    cores: 4
+    sockets: 1
+    threads: 1
+  memory:
+    quantity: "64Gi"
+  machineProviders:
+    - kubevirt
+
+---
+# Large CPU MachineClass - for CPU-intensive workloads (disabled by default)
+apiVersion: vitistack.io/v1alpha1
+kind: MachineClass
+metadata:
+  name: largecpu
+spec:
+  enabled: false # Disabled - not available for use
+  default: false
+  category: "CPU"
+  displayName: "Large CPU"
+  description: "CPU-optimized instance with 8 cores and 16Gi memory"
+  cpu:
+    cores: 8
+    sockets: 2
+    threads: 1
+  memory:
+    quantity: "16Gi"
+  machineProviders:
+    - kubevirt

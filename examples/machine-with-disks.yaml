@@ -5,7 +5,7 @@ metadata:
   name: example-machine-with-disks
   namespace: default
 spec:
-  instanceType: "medium"
+  machineClass: "medium"
   name: "example-vm-with-disks"
   provider: kubevirt
   disks:

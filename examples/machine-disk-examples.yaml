@@ -6,7 +6,7 @@ metadata:
   name: simple-machine
   namespace: default
 spec:
-  instanceType: "small"
+  machineClass: "small"
   name: "simple-vm"
   provider: kubevirt
 
@@ -18,7 +18,7 @@ metadata:
   name: single-disk-machine
   namespace: default
 spec:
-  instanceType: "medium"
+  machineClass: "medium"
   name: "single-disk-vm"
   provider: kubevirt
   disks:
@@ -36,9 +36,9 @@ metadata:
   namespace: default
 spec:
   provider: kubevirt
-  instanceType: "large"
+  machineClass: "large"
   name: "multi-disk-vm"
-  memory: 8589934592 # 8GB in bytes
+  memory: 8589934592 # 8GB in bytes - overrides MachineClass default
   cpu:
     cores: 4
   disks:

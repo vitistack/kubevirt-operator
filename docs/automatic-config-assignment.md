@@ -58,7 +58,7 @@ metadata:
   annotations:
     vitistack.io/kubevirt-config: production-cluster
 spec:
-  instanceType: large
+  machineClass: large
 ```
 
 **Result:** Uses `production-cluster` (priority 1)
@@ -72,7 +72,7 @@ kind: Machine
 metadata:
   name: test-vm
 spec:
-  instanceType: small
+  machineClass: small
 ```
 
 **Result:**
@@ -91,7 +91,7 @@ kind: Machine
 metadata:
   name: dynamic-vm
 spec:
-  instanceType: medium
+  machineClass: medium
 ```
 
 **Result:**
@@ -111,7 +111,7 @@ kind: Machine
 metadata:
   name: dynamic-vm
 spec:
-  instanceType: medium
+  machineClass: medium
 ```
 
 **Result:**
@@ -133,7 +133,7 @@ kind: Machine
 metadata:
   name: new-vm
 spec:
-  instanceType: small
+  machineClass: small
 ```
 
 **Result:**
@@ -155,7 +155,7 @@ kind: Machine
 metadata:
   name: broken-vm
 spec:
-  instanceType: small
+  machineClass: small
 ```
 
 **Result:**
@@ -225,7 +225,7 @@ metadata:
   annotations:
     vitistack.io/kubevirt-config: some-cluster # Required!
 spec:
-  instanceType: medium
+  machineClass: medium
 ```
 
 **After:**
@@ -237,7 +237,7 @@ metadata:
   name: my-vm
   # No annotation needed!
 spec:
-  instanceType: medium
+  machineClass: medium
 ```
 
 ### 2. Flexible Deployment Models

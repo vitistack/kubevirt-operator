@@ -8,7 +8,7 @@ metadata:
     kubevirt.io/boot-source: "datavolume"
     kubevirt.io/boot-source-type: "http"
 spec:
-  instanceType: "medium"
+  machineClass: "medium"
   name: "talos-iso-vm"
   provider: kubevirt
 
@@ -16,7 +16,7 @@ spec:
   os:
     family: linux
     distribution: talos
-    version: "24.04"
+    version: "1.11.5"
     architecture: amd64
     # HTTP URL to the Talos ISO image
     # This will be used to create a DataVolume with CDI

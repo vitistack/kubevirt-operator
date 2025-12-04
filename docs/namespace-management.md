@@ -21,7 +21,7 @@ metadata:
   name: my-vm
   namespace: production # ← This namespace
 spec:
-  instanceType: small
+  machineClass: small
 ```
 
 The operator will:
@@ -50,7 +50,7 @@ metadata:
   name: test-vm
   namespace: default # No namespace creation needed
 spec:
-  instanceType: small
+  machineClass: small
 ```
 
 ### Custom Namespace
@@ -71,7 +71,7 @@ metadata:
   name: app-vm
   namespace: my-app # Automatically created on remote cluster
 spec:
-  instanceType: medium
+  machineClass: medium
 ```
 
 ### Multiple Machines in Same Namespace

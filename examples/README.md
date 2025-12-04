@@ -2,6 +2,33 @@
 
 This directory contains example Machine manifests demonstrating various configurations.
 
+## Prerequisites
+
+Before creating Machines, you must have MachineClass resources defined. MachineClasses are cluster-scoped resources that define VM resource presets (CPU, memory, etc.).
+
+### Creating MachineClasses
+
+Apply the example MachineClasses first:
+
+```bash
+kubectl apply -f examples/machineclasses.yaml
+```
+
+This creates the following MachineClasses:
+
+- `small` - 2 cores, 8Gi memory
+- `medium` - 4 cores, 16Gi memory (default)
+- `large` - 4 cores, 32Gi memory
+- `xlarge` - 4 cores, 48Gi memory
+- `largememory` - 4 cores, 64Gi memory
+- `largecpu` - 8 cores, 16Gi memory (disabled by default)
+
+Verify MachineClasses are available:
+
+```bash
+kubectl get machineclasses
+```
+
 ## Boot Methods
 
 ### 1. PXE Boot (Default)
@@ -87,15 +114,19 @@ spec:
 
 ## Resource Configuration Examples
 
-### Instance Types
+### MachineClasses
 
-- `machine-small.yaml` - 1 CPU, 1GB RAM
-- `machine-medium.yaml` - 2 CPU, 2GB RAM
-- `machine-large.yaml` - 4 CPU, 4GB RAM
+- `machineclasses.yaml` - Predefined VM resource presets (must be applied first)
+
+### Using MachineClasses
+
+- `machine-small.yaml` - Uses "small" MachineClass (2 cores, 8Gi)
+- `machine-medium.yaml` - Uses "medium" MachineClass (4 cores, 16Gi)
+- `machine-large.yaml` - Uses "large" MachineClass (4 cores, 32Gi)
 
 ### With Overrides
 
-- `machine-small-with-overrides.yaml` - Custom CPU/memory beyond instance type
+- `machine-small-with-overrides.yaml` - Custom CPU/memory overriding MachineClass defaults
 - `machine-medium-with-overrides.yaml` - Custom resource allocation
 
 ### Disk Configuration
@@ -114,10 +145,12 @@ spec:
 ```yaml
 spec:
   provider: kubevirt # Must be "kubevirt"
-  instanceType: "medium" # small, medium, or large
+  machineClass: "medium" # References a MachineClass resource (small, medium, large, etc.)
 ```
 
 ### Optional Resource Overrides
+
+You can override MachineClass defaults per-machine:
 
 ```yaml
 spec:
@@ -125,7 +158,7 @@ spec:
     cores: 4
     sockets: 1
     threadsPerCore: 2
-  memory: 4294967296 # bytes (4GB)
+  memory: 4294967296 # bytes (4GB) - overrides MachineClass default
 ```
 
 ### Optional Disk Configuration

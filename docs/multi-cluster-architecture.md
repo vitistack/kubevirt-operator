@@ -181,7 +181,7 @@ metadata:
   annotations:
     vitistack.io/kubevirt-config: cluster-east # Optional, see below
 spec:
-  instanceType: medium
+  machineClass: medium
   # ... other spec fields
 ```
 
@@ -214,7 +214,7 @@ metadata:
   name: my-machine
   # No annotation needed with single cluster!
 spec:
-  instanceType: medium
+  machineClass: medium
 ```
 
 The operator will log:
@@ -237,7 +237,7 @@ metadata:
   annotations:
     vitistack.io/kubevirt-config: cluster-west
 spec:
-  instanceType: medium
+  machineClass: medium
 ```
 
 **Option 2: Set default** (for all new VMs)
@@ -316,7 +316,7 @@ The operator automatically validates CRD schemas and versions during initializat
 
 - Fetches complete CRD schemas for machines, networkconfigurations, and kubevirtconfigs
 - Validates that expected properties exist in the CRD schemas:
-  - `machines.vitistack.io`: instanceType, kubevirtConfigRef, phase, conditions
+  - `machines.vitistack.io`: machineClass, kubevirtConfigRef, phase, conditions
   - `networkconfigurations.vitistack.io`: networks, phase
   - `kubevirtconfigs.vitistack.io`: kubeconfigSecretRef, phase
 - Logs warnings if expected fields are missing from the schema
@@ -425,7 +425,7 @@ func TestMachineReconciler_CreateVM(t *testing.T) {
             },
         },
         Spec: vitistackv1alpha1.MachineSpec{
-            InstanceType: "medium",
+            MachineClass: "medium",
         },
     }
 

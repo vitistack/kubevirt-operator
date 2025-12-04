@@ -8,7 +8,7 @@ metadata:
     kubevirt.io/boot-source: "datavolume"
     kubevirt.io/boot-source-type: "http"
 spec:
-  instanceType: "medium"
+  machineClass: "medium"
   name: "debian-iso-vm"
   provider: kubevirt
 

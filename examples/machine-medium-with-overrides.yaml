@@ -4,9 +4,9 @@ kind: Machine
 metadata:
   name: example-machine-medium-with-overrides
 spec:
-  instanceType: "medium"
+  machineClass: "medium"
   name: "example-vm-medium-with-overrides"
   provider: kubevirt
-  memory: 3221225472 # 3 GB in bytes
+  memory: 3221225472 # 3 GB in bytes - overrides MachineClass default
   cpu:
-    cores: 3
+    cores: 3 # Override MachineClass default

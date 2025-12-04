@@ -18,7 +18,7 @@ metadata:
   namespace: my-custom-namespace # This namespace will be created on the remote KubeVirt cluster
 spec:
   provider: kubevirt
-  instanceType: small
+  machineClass: small
   cpu:
     cores: 2
   memory: 2147483648 # 2Gi in bytes

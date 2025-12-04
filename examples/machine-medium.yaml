@@ -4,6 +4,6 @@ kind: Machine
 metadata:
   name: example-machine-medium
 spec:
-  instanceType: "medium"
+  machineClass: "medium"
   name: "example-vm-medium"
   provider: kubevirt
