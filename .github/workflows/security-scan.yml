@@ -18,6 +18,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run security scan
+      - name: Run gosec
         run: |
-          make go-security-scan
+          make gosec
+
+      - name: Run govulncheck
+        run: |
+          make govulncheck
