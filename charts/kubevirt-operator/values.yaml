@@ -85,12 +85,16 @@ resources:
 # This is to setup the liveness and readiness probes more information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
 livenessProbe:
   httpGet:
-    path: /
+    path: /healthz
     port: 9992
+  initialDelaySeconds: 15
+  periodSeconds: 20
 readinessProbe:
   httpGet:
-    path: /
+    path: /readyz
     port: 9992
+  initialDelaySeconds: 5
+  periodSeconds: 10
 
 # This section is for setting up autoscaling more information can be found here: https://kubernetes.io/docs/concepts/workloads/autoscaling/
 autoscaling:
@@ -118,3 +122,63 @@ nodeSelector: {}
 tolerations: []
 
 affinity: {}
+
+# Operator configuration
+# These settings are passed as environment variables to the operator
+config:
+  # Namespace the operator manages (uses Release.Namespace if empty)
+  namespace: ""
+  # CPU model for VMs: "host-model" (default for x86), "host-passthrough" (required for ARM)
+  cpuModel: ""
+  # CNI version
+  cniVersion: "1.0.0"
+  # Where to fetch public IPs from: "vmi" (default, from KubeVirt VMI) or "networkconfiguration"
+  ipSource: "vmi"
+  # Enable Containerized Data Importer (CDI) support
+  kubevirtSupportCDI: false
+  # Name of the MachineProvider
+  machineProviderName: "kubevirt-provider"
+  # PVC volume mode: "Block" (default) or "Filesystem"
+  pvcVolumeMode: "Block"
+  # Optional prefix for VM names
+  vmNamePrefix: ""
+  # Vitistack name (optional)
+  vitistackName: ""
+
+# Logging configuration
+logging:
+  # Log level: debug, info, warn, error
+  level: "info"
+  # Output logs as JSON
+  json: true
+  # Add caller information to logs
+  addCaller: false
+  # Disable stacktrace in logs
+  disableStacktrace: true
+  # Unescape multiline log messages
+  unescapedMultiline: false
+  # Colorize log lines (for development)
+  colorizeLine: false
+
+# Leader election for HA deployments
+leaderElection:
+  enabled: true
+
+# Metrics configuration
+metrics:
+  # Enable metrics endpoint
+  enabled: true
+  # Metrics bind address (use ":8443" for HTTPS, ":8080" for HTTP, "0" to disable)
+  bindAddress: ":8443"
+  # Serve metrics over HTTPS
+  secure: true
+
+# Health probe configuration
+healthProbe:
+  # Health probe bind address
+  bindAddress: ":9992"
+
+# RBAC configuration
+rbac:
+  # Create ClusterRole and ClusterRoleBinding
+  create: true

@@ -40,6 +40,52 @@ spec:
           {{- end }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --health-probe-bind-address={{ .Values.healthProbe.bindAddress }}
+            - --metrics-bind-address={{ .Values.metrics.bindAddress }}
+            - --metrics-secure={{ .Values.metrics.secure }}
+            - --leader-elect={{ .Values.leaderElection.enabled }}
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- if .Values.config.cpuModel }}
+            - name: CPU_MODEL
+              value: {{ .Values.config.cpuModel | quote }}
+            {{- end }}
+            {{- if .Values.config.cniVersion }}
+            - name: CNI_VERSION
+              value: {{ .Values.config.cniVersion | quote }}
+            {{- end }}
+            - name: IP_SOURCE
+              value: {{ .Values.config.ipSource | quote }}
+            - name: KUBEVIRT_SUPPORT_CONTAINERIZED_DATA_IMPORTER
+              value: {{ .Values.config.kubevirtSupportCDI | quote }}
+            - name: NAME_MACHINE_PROVIDER
+              value: {{ .Values.config.machineProviderName | quote }}
+            - name: PVC_VOLUME_MODE
+              value: {{ .Values.config.pvcVolumeMode | quote }}
+            {{- if .Values.config.vmNamePrefix }}
+            - name: VM_NAME_PREFIX
+              value: {{ .Values.config.vmNamePrefix | quote }}
+            {{- end }}
+            {{- if .Values.config.vitistackName }}
+            - name: VITISTACK_NAME
+              value: {{ .Values.config.vitistackName | quote }}
+            {{- end }}
+            - name: LOG_LEVEL
+              value: {{ .Values.logging.level | quote }}
+            - name: LOG_JSON
+              value: {{ .Values.logging.json | quote }}
+            - name: LOG_ADD_CALLER
+              value: {{ .Values.logging.addCaller | quote }}
+            - name: LOG_DISABLE_STACKTRACE
+              value: {{ .Values.logging.disableStacktrace | quote }}
+            - name: LOG_UNESCAPED_MULTILINE
+              value: {{ .Values.logging.unescapedMultiline | quote }}
+            - name: LOG_COLORIZE_LINE
+              value: {{ .Values.logging.colorizeLine | quote }}
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
