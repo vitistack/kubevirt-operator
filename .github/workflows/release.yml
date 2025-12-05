@@ -11,8 +11,14 @@ permissions:
 
 jobs:
   create-oci-image:
-    name: Create OCI Image
-    runs-on: ubuntu-latest
+    name: Create OCI Image (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -48,7 +54,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
