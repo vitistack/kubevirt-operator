@@ -47,7 +47,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
 // MachineReconciler reconciles a Machine object
@@ -221,26 +223,18 @@ func (r *MachineReconciler) fetchAndInitMachine(ctx context.Context, req ctrl.Re
 	machine := &vitistackv1alpha1.Machine{}
 	if err := r.Get(ctx, req.NamespacedName, machine); err != nil {
 		if errors.IsNotFound(err) {
-			logger.Info("Machine resource not found")
+			// This is expected when the resource is deleted. Use V(1) to reduce log noise.
+			logger.V(1).Info("Machine resource not found, likely already deleted",
+				"name", req.Name,
+				"namespace", req.Namespace)
 			return nil, ctrl.Result{}, true, nil
 		}
 		logger.Error(err, "Failed to get Machine")
 		return nil, ctrl.Result{}, true, err
 	}
 
-	// Guard: Only reconcile Machines for the kubevirt provider (default if unspecified)
-	if !r.isKubevirtProvider(machine) {
-		// If we somehow have our finalizer, ensure we don't block deletion
-		if machine.GetDeletionTimestamp() != nil && controllerutil.ContainsFinalizer(machine, MachineFinalizer) {
-			controllerutil.RemoveFinalizer(machine, MachineFinalizer)
-			if err := r.Update(ctx, machine); err != nil {
-				logger.Error(err, "Failed to remove finalizer from non-kubevirt Machine")
-				return machine, ctrl.Result{}, true, err
-			}
-		}
-		logger.V(1).Info("Skipping reconcile for non-kubevirt provider", "provider", r.getProviderName(machine))
-		return machine, ctrl.Result{}, true, nil
-	}
+	// Note: Provider filtering is done at the predicate level in SetupWithManager,
+	// so we only receive events for kubevirt machines here.
 
 	if machine.GetDeletionTimestamp() != nil {
 		logger.Info("Machine has deletion timestamp, entering deletion flow",
@@ -630,11 +624,42 @@ func NewMachineReconciler(c client.Client, scheme *runtime.Scheme, kubevirtClien
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Create predicate to filter only KubeVirt machines
+	// This prevents the reconciler from being triggered for machines with other providers
+	kubevirtMachinePredicate := predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			if machine, ok := e.Object.(*vitistackv1alpha1.Machine); ok {
+				return r.isKubevirtProvider(machine)
+			}
+			return false
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			if machine, ok := e.ObjectNew.(*vitistackv1alpha1.Machine); ok {
+				return r.isKubevirtProvider(machine)
+			}
+			return false
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			if machine, ok := e.Object.(*vitistackv1alpha1.Machine); ok {
+				return r.isKubevirtProvider(machine)
+			}
+			return false
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			if machine, ok := e.Object.(*vitistackv1alpha1.Machine); ok {
+				return r.isKubevirtProvider(machine)
+			}
+			return false
+		},
+	}
+
 	// In a multi-cluster architecture, we only watch Machine resources on the supervisor cluster.
 	// VirtualMachine and VirtualMachineInstance resources exist on remote KubeVirt clusters,
 	// not on the supervisor cluster, so we don't set up watches for them here.
 	// Instead, we interact with them directly through the remote clients in the reconciliation loop.
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vitistackv1alpha1.Machine{}).
+		WithEventFilter(kubevirtMachinePredicate).
+		Named("kubevirt-machine").
 		Complete(r)
 }
