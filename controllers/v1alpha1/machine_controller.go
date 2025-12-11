@@ -138,6 +138,10 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return result, err
 	}
 
+	// Handle ISO cleanup if needed (delete DataVolume/PVC after OS installation)
+	// Boot order ensures root disk boots first, so this is purely for freeing storage
+	r.handleISOCleanup(ctx, machine, vmName)
+
 	vmi, vmiExists, err := r.getVMI(ctx, vmName, machine.Namespace, remoteClient)
 	if err != nil {
 		logger.Error(err, "Failed to get VirtualMachineInstance")
@@ -150,7 +154,7 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		logger.Error(err, "Failed to update Machine status from VM/VMI")
 	}
 
-	// Always requeue after 15 seconds to keep status fresh for dependent operators
+	// Always requeue after 5 seconds to keep status fresh for dependent operators
 	if result.RequeueAfter == 0 {
 		result.RequeueAfter = RequeueDelay
 	}
@@ -291,6 +295,38 @@ func (r *MachineReconciler) ensureVirtualMachine(ctx context.Context, machine *v
 		return newVM, vmName, ctrl.Result{}, false, nil
 	}
 	return virtualmachine, vmName, ctrl.Result{}, false, nil
+}
+
+// handleISOCleanup checks if ISO resources should be cleaned up and deletes them if needed.
+// This is called after the VM is created/fetched to handle ISO cleanup after OS installation.
+// Boot order ensures root disk boots first, so cleanup is purely for freeing storage.
+func (r *MachineReconciler) handleISOCleanup(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string) {
+	logger := log.FromContext(ctx)
+
+	// Check if ISO cleanup is needed
+	if !r.VMManager.ShouldCleanupISO(machine) {
+		return
+	}
+
+	logger.Info("Cleaning up ISO resources", "vm", vmName)
+	if err := r.VMManager.CleanupISOResources(ctx, machine, vmName); err != nil {
+		logger.Error(err, "Failed to cleanup ISO resources")
+		// Continue anyway, we can retry on next reconcile
+		return
+	}
+
+	// Mark cleanup as done to avoid repeated attempts
+	if machine.Annotations == nil {
+		machine.Annotations = make(map[string]string)
+	}
+	machine.Annotations[vm.AnnotationISOCleanedUp] = vm.AnnotationValueTrue
+
+	// Update the Machine with the cleanup annotation
+	if err := r.Update(ctx, machine); err != nil {
+		logger.Error(err, "Failed to mark ISO as cleaned up")
+	}
+
+	logger.Info("ISO resources cleaned up successfully", "vm", vmName)
 }
 
 // getVMI retrieves the VMI if it exists from the remote cluster.

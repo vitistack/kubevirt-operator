@@ -79,7 +79,7 @@ type vmBuildParams struct {
 }
 
 // buildVMSpec creates the VirtualMachine specification from the given parameters
-func (m *VMManager) buildVMSpec(params *vmBuildParams) *kubevirtv1.VirtualMachine {
+func (m *VMManager) buildVMSpec(ctx context.Context, params *vmBuildParams) *kubevirtv1.VirtualMachine {
 	runStrategy := kubevirtv1.RunStrategyAlways
 	cpuModel := viper.GetString(consts.CPU_MODEL)
 
@@ -94,7 +94,7 @@ func (m *VMManager) buildVMSpec(params *vmBuildParams) *kubevirtv1.VirtualMachin
 		},
 		Spec: kubevirtv1.VirtualMachineSpec{
 			RunStrategy:         &runStrategy,
-			DataVolumeTemplates: m.buildDataVolumeTemplates(params.machine, params.vmName),
+			DataVolumeTemplates: m.buildDataVolumeTemplates(ctx, params.machine, params.vmName),
 			Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -112,6 +112,14 @@ func (m *VMManager) buildVMSpec(params *vmBuildParams) *kubevirtv1.VirtualMachin
 						},
 						Memory: &kubevirtv1.Memory{
 							Guest: ptr.To(resource.MustParse(params.memoryRequest)),
+						},
+						Firmware: &kubevirtv1.Firmware{
+							Bootloader: &kubevirtv1.Bootloader{
+								EFI: &kubevirtv1.EFI{
+									// SecureBoot disabled for broader OS compatibility
+									SecureBoot: ptr.To(false),
+								},
+							},
 						},
 						Devices: kubevirtv1.Devices{
 							Disks: params.disks,
@@ -180,7 +188,7 @@ func (m *VMManager) CreateVirtualMachine(
 		return nil, err
 	}
 
-	vm := m.buildVMSpec(&vmBuildParams{
+	vm := m.buildVMSpec(ctx, &vmBuildParams{
 		vmName:               vmName,
 		machine:              machine,
 		disks:                disks,

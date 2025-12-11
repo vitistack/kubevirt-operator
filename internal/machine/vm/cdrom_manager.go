@@ -21,8 +21,11 @@ import (
 	"fmt"
 
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	kubevirtv1 "kubevirt.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -31,8 +34,18 @@ const (
 	// CDROMVolumeName is the name of the CDROM volume used for ISO boot
 	CDROMVolumeName = "cdrom-iso"
 
-	// AnnotationCDROMEjected indicates the CDROM has been removed after installation
+	// AnnotationCDROMEjected indicates the ISO resources should be cleaned up.
+	// This is set by the user or an external operator after OS installation.
+	// When set to "true", the ISO DataVolume/PVC will be deleted to free storage.
+	// Note: Boot order ensures the installed OS on root disk boots first,
+	// so removal is purely for resource cleanup.
 	AnnotationCDROMEjected = "vitistack.io/cdrom-ejected"
+
+	// AnnotationOSInstalled indicates the OS has been installed to disk.
+	// This is typically set by an external operator (e.g., talos-operator)
+	// after the OS installation completes and the system is ready to boot from disk.
+	// When set to "true", the ISO DataVolume/PVC will be deleted to free storage.
+	AnnotationOSInstalled = "vitistack.io/os-installed"
 
 	// AnnotationBootSource indicates the boot source type (from Machine spec)
 	AnnotationBootSource = "kubevirt.io/boot-source"
@@ -42,139 +55,92 @@ const (
 
 	// AnnotationValueTrue is the string value for true annotations
 	AnnotationValueTrue = "true"
+
+	// AnnotationISOCleanedUp marks that ISO resources have already been cleaned up
+	AnnotationISOCleanedUp = "vitistack.io/iso-cleaned-up"
 )
 
-// ShouldRemoveCDROM determines if the CDROM volume should be removed from the VM.
-// The CDROM should be removed when:
-// 1. The VM was created with an ISO boot source (imageID is set)
-// 2. The VM is now running successfully (phase is Running)
-// 3. The CDROM hasn't already been ejected
-func (m *VMManager) ShouldRemoveCDROM(machine *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine) bool {
-	// Check if machine was created with ISO boot
-	if machine.Spec.OS.ImageID == "" {
+// ShouldCleanupISO determines if the ISO resources should be cleaned up.
+// The ISO DataVolume/PVC should be deleted when:
+// 1. Either AnnotationCDROMEjected or AnnotationOSInstalled is set to "true"
+// 2. The ISO hasn't already been cleaned up (to avoid repeated attempts)
+//
+// Note: This is purely for resource cleanup. Boot order ensures the root disk
+// (with installed OS) boots before the CDROM, so removal doesn't affect boot.
+func (m *VMManager) ShouldCleanupISO(machine *vitistackv1alpha1.Machine) bool {
+	// Check if cleanup is requested via annotations
+	if !IsMarkedForCDROMRemoval(machine) {
 		return false
 	}
 
-	// Check if CDROM was already ejected
-	if machine.Annotations != nil && machine.Annotations[AnnotationCDROMEjected] == AnnotationValueTrue {
-		return false
-	}
-
-	// Check if VM exists and has the cdrom-iso volume
-	if vm == nil || vm.Spec.Template == nil {
-		return false
-	}
-
-	hasCDROM := false
-	for i := range vm.Spec.Template.Spec.Volumes {
-		if vm.Spec.Template.Spec.Volumes[i].Name == CDROMVolumeName {
-			hasCDROM = true
-			break
-		}
-	}
-
-	if !hasCDROM {
-		return false
-	}
-
-	// Check if VMI is running - we only eject after successful boot from disk
-	// This is checked by looking at the VM's status
-	if vm.Status.PrintableStatus != kubevirtv1.VirtualMachineStatusRunning {
-		return false
-	}
-
-	// Additional check: verify the VM is ready (successfully booted)
-	if !vm.Status.Ready {
+	// Check if already cleaned up
+	if machine.Annotations[AnnotationISOCleanedUp] == AnnotationValueTrue {
 		return false
 	}
 
 	return true
 }
 
-// RemoveCDROMVolume removes the CDROM volume from a running VM using hotunplug.
-// This is typically called after the OS has been installed from the ISO.
-// The function patches the VM to remove the cdrom-iso disk and volume.
-func (m *VMManager) RemoveCDROMVolume(ctx context.Context, machine *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine) error {
+// CleanupISOResources deletes the ISO DataVolume and PVC to free storage.
+// This is called when the machine is marked for CDROM removal via annotations.
+// The VM doesn't need to be modified - boot order ensures root disk boots first.
+func (m *VMManager) CleanupISOResources(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string) error {
 	logger := log.FromContext(ctx)
 
-	if vm == nil {
-		return fmt.Errorf("VM is nil")
-	}
+	isoName := vmName + "-iso"
+	namespace := machine.Namespace
 
-	// Get fresh copy of VM
-	currentVM := &kubevirtv1.VirtualMachine{}
-	if err := m.remoteClient.Get(ctx, client.ObjectKeyFromObject(vm), currentVM); err != nil {
-		return fmt.Errorf("failed to get current VM state: %w", err)
-	}
-
-	// Find and remove the CDROM disk and volume
-	originalVM := currentVM.DeepCopy()
-
-	// Remove CDROM disk
-	newDisks := make([]kubevirtv1.Disk, 0, len(currentVM.Spec.Template.Spec.Domain.Devices.Disks))
-	for i := range currentVM.Spec.Template.Spec.Domain.Devices.Disks {
-		if currentVM.Spec.Template.Spec.Domain.Devices.Disks[i].Name != CDROMVolumeName {
-			newDisks = append(newDisks, currentVM.Spec.Template.Spec.Domain.Devices.Disks[i])
+	// Delete the DataVolume (this should cascade delete the PVC)
+	dv := &cdiv1.DataVolume{}
+	dvKey := types.NamespacedName{Name: isoName, Namespace: namespace}
+	if err := m.remoteClient.Get(ctx, dvKey, dv); err != nil {
+		if errors.IsNotFound(err) {
+			logger.V(1).Info("ISO DataVolume already deleted or doesn't exist", "name", isoName)
+		} else {
+			return fmt.Errorf("failed to get ISO DataVolume: %w", err)
 		}
-	}
-	currentVM.Spec.Template.Spec.Domain.Devices.Disks = newDisks
-
-	// Remove CDROM volume
-	newVolumes := make([]kubevirtv1.Volume, 0, len(currentVM.Spec.Template.Spec.Volumes))
-	for i := range currentVM.Spec.Template.Spec.Volumes {
-		if currentVM.Spec.Template.Spec.Volumes[i].Name != CDROMVolumeName {
-			newVolumes = append(newVolumes, currentVM.Spec.Template.Spec.Volumes[i])
+	} else {
+		if err := m.remoteClient.Delete(ctx, dv); err != nil && !errors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete ISO DataVolume: %w", err)
 		}
+		logger.Info("Deleted ISO DataVolume", "name", isoName)
 	}
-	currentVM.Spec.Template.Spec.Volumes = newVolumes
 
-	// Remove the DataVolume template for the ISO
-	if len(currentVM.Spec.DataVolumeTemplates) > 0 {
-		newDVTemplates := make([]kubevirtv1.DataVolumeTemplateSpec, 0, len(currentVM.Spec.DataVolumeTemplates))
-		for i := range currentVM.Spec.DataVolumeTemplates {
-			if currentVM.Spec.DataVolumeTemplates[i].Name != vm.Name+"-iso" {
-				newDVTemplates = append(newDVTemplates, currentVM.Spec.DataVolumeTemplates[i])
-			}
+	// Also try to delete the PVC directly in case it wasn't cascade deleted
+	pvc := &corev1.PersistentVolumeClaim{}
+	pvcKey := types.NamespacedName{Name: isoName, Namespace: namespace}
+	if err := m.remoteClient.Get(ctx, pvcKey, pvc); err != nil {
+		if errors.IsNotFound(err) {
+			logger.V(1).Info("ISO PVC already deleted or doesn't exist", "name", isoName)
+		} else {
+			return fmt.Errorf("failed to get ISO PVC: %w", err)
 		}
-		currentVM.Spec.DataVolumeTemplates = newDVTemplates
+	} else {
+		if err := m.remoteClient.Delete(ctx, pvc); err != nil && !errors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete ISO PVC: %w", err)
+		}
+		logger.Info("Deleted ISO PVC", "name", isoName)
 	}
 
-	// Patch the VM
-	if err := m.remoteClient.Patch(ctx, currentVM, client.MergeFrom(originalVM)); err != nil {
-		return fmt.Errorf("failed to patch VM to remove CDROM: %w", err)
-	}
-
-	logger.Info("Successfully removed CDROM volume from VM", "vm", vm.Name)
-
-	// Mark the CDROM as ejected in machine annotations
-	if err := m.markCDROMEjected(ctx, machine); err != nil {
-		logger.Error(err, "Failed to mark CDROM as ejected in machine annotations")
-		// Don't return error - the CDROM was already removed from VM
-	}
+	logger.Info("Successfully cleaned up ISO resources",
+		"vm", vmName,
+		"reason", getCDROMRemovalReason(machine))
 
 	return nil
 }
 
-// markCDROMEjected adds an annotation to the Machine indicating the CDROM was ejected
-func (m *VMManager) markCDROMEjected(ctx context.Context, machine *vitistackv1alpha1.Machine) error {
-	// Get fresh copy of machine
-	currentMachine := &vitistackv1alpha1.Machine{}
-	if err := m.supervisorClient.Get(ctx, client.ObjectKeyFromObject(machine), currentMachine); err != nil {
-		return fmt.Errorf("failed to get current machine state: %w", err)
+// getCDROMRemovalReason returns a human-readable reason for CDROM removal
+func getCDROMRemovalReason(machine *vitistackv1alpha1.Machine) string {
+	if machine.Annotations == nil {
+		return "unknown"
 	}
-
-	originalMachine := currentMachine.DeepCopy()
-
-	if currentMachine.Annotations == nil {
-		currentMachine.Annotations = make(map[string]string)
+	if machine.Annotations[AnnotationOSInstalled] == AnnotationValueTrue {
+		return "os-installed"
 	}
-	currentMachine.Annotations[AnnotationCDROMEjected] = AnnotationValueTrue
-
-	if err := m.supervisorClient.Patch(ctx, currentMachine, client.MergeFrom(originalMachine)); err != nil {
-		return fmt.Errorf("failed to patch machine annotations: %w", err)
+	if machine.Annotations[AnnotationCDROMEjected] == AnnotationValueTrue {
+		return "cdrom-ejected"
 	}
-
-	return nil
+	return "unknown"
 }
 
 // HasCDROMVolume checks if the VM has a CDROM volume attached
@@ -191,15 +157,45 @@ func HasCDROMVolume(vm *kubevirtv1.VirtualMachine) bool {
 	return false
 }
 
-// IsCDROMEjected checks if the CDROM has already been ejected from the machine
+// IsMarkedForCDROMRemoval checks if the machine has annotations indicating
+// the ISO resources should be cleaned up. Returns true if either:
+// - AnnotationCDROMEjected is set to "true"
+// - AnnotationOSInstalled is set to "true"
+func IsMarkedForCDROMRemoval(machine *vitistackv1alpha1.Machine) bool {
+	if machine == nil || machine.Annotations == nil {
+		return false
+	}
+
+	// Check if cdrom-ejected annotation is set
+	if machine.Annotations[AnnotationCDROMEjected] == AnnotationValueTrue {
+		return true
+	}
+
+	// Check if os-installed annotation is set (Talos scenario)
+	if machine.Annotations[AnnotationOSInstalled] == AnnotationValueTrue {
+		return true
+	}
+
+	return false
+}
+
+// IsCDROMEjected checks if the machine has the cdrom-ejected annotation set
 func IsCDROMEjected(machine *vitistackv1alpha1.Machine) bool {
-	if machine.Annotations == nil {
+	if machine == nil || machine.Annotations == nil {
 		return false
 	}
 	return machine.Annotations[AnnotationCDROMEjected] == AnnotationValueTrue
 }
 
+// IsOSInstalled checks if the machine has the os-installed annotation set
+func IsOSInstalled(machine *vitistackv1alpha1.Machine) bool {
+	if machine == nil || machine.Annotations == nil {
+		return false
+	}
+	return machine.Annotations[AnnotationOSInstalled] == AnnotationValueTrue
+}
+
 // WasCreatedWithISO checks if the machine was created with an ISO boot source
 func WasCreatedWithISO(machine *vitistackv1alpha1.Machine) bool {
-	return machine.Spec.OS.ImageID != ""
+	return machine != nil && machine.Spec.OS.ImageID != ""
 }

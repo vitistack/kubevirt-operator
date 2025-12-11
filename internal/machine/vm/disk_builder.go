@@ -17,7 +17,10 @@ limitations under the License.
 package vm
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"time"
 
 	"github.com/spf13/viper"
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
@@ -27,6 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // Bus type constants for disk configuration
@@ -34,6 +38,9 @@ const (
 	BusTypeVirtio kubevirtv1.DiskBus = "virtio"
 	BusTypeSata   kubevirtv1.DiskBus = "sata"
 	BusTypeScsi   kubevirtv1.DiskBus = "scsi"
+
+	// SourceTypeHTTP is the default source type for ISO boot
+	SourceTypeHTTP = "http"
 )
 
 // buildDisksAndVolumes creates disk and volume specifications for the VM
@@ -173,7 +180,9 @@ func (m *VMManager) addISOBootSource(disks []kubevirtv1.Disk, volumes []kubevirt
 }
 
 // buildDataVolumeTemplates creates DataVolume templates for ISO boot
-func (m *VMManager) buildDataVolumeTemplates(machine *vitistackv1alpha1.Machine, vmName string) []kubevirtv1.DataVolumeTemplateSpec {
+func (m *VMManager) buildDataVolumeTemplates(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string) []kubevirtv1.DataVolumeTemplateSpec {
+	logger := log.FromContext(ctx)
+
 	bootSourceType := machine.Annotations[AnnotationBootSource]
 	if bootSourceType != BootSourceDataVolume || machine.Spec.OS.ImageID == "" {
 		return nil
@@ -182,10 +191,13 @@ func (m *VMManager) buildDataVolumeTemplates(machine *vitistackv1alpha1.Machine,
 	// Determine source type (http, registry, pvc, etc.)
 	sourceType := machine.Annotations["kubevirt.io/boot-source-type"]
 	if sourceType == "" {
-		sourceType = "http" // Default to HTTP
+		sourceType = SourceTypeHTTP // Default to HTTP
 	}
 
-	storageSize := resource.MustParse("10Gi")
+	// Try to get the actual ISO size, fall back to default 8Gi
+	storageSize := getISOStorageSize(ctx, machine.Spec.OS.ImageID, sourceType)
+	logger.V(1).Info("Determined ISO storage size", "url", machine.Spec.OS.ImageID, "size", storageSize.String())
+
 	// ISO images require Filesystem volume mode for CDROM
 	filesystemMode := corev1.PersistentVolumeFilesystem
 
@@ -226,4 +238,78 @@ func (m *VMManager) buildDataVolumeTemplates(machine *vitistackv1alpha1.Machine,
 	}
 
 	return []kubevirtv1.DataVolumeTemplateSpec{template}
+}
+
+// DefaultISOStorageSize is the fallback size when ISO size cannot be determined
+const DefaultISOStorageSize = "8Gi"
+
+// ISOSizeHTTPTimeout is the timeout for HTTP HEAD requests to get ISO size
+const ISOSizeHTTPTimeout = 10 * time.Second
+
+// getISOStorageSize attempts to determine the storage size needed for an ISO.
+// For HTTP/HTTPS sources, it makes a HEAD request to get Content-Length.
+// Returns the actual size rounded up to the nearest Gi, or DefaultISOStorageSize on failure.
+func getISOStorageSize(ctx context.Context, imageURL string, sourceType string) resource.Quantity {
+	logger := log.FromContext(ctx)
+
+	// Only HTTP/HTTPS sources support HEAD requests
+	if sourceType != SourceTypeHTTP && sourceType != "https" {
+		return resource.MustParse(DefaultISOStorageSize)
+	}
+
+	// Create HTTP client with timeout that follows redirects
+	client := &http.Client{
+		Timeout: ISOSizeHTTPTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// Allow up to 10 redirects
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		},
+	}
+
+	// Make HEAD request to get Content-Length without downloading
+	resp, err := client.Head(imageURL)
+	if err != nil {
+		logger.V(1).Info("Failed to get ISO size via HEAD request, using default",
+			"url", imageURL, "error", err.Error(), "default", DefaultISOStorageSize)
+		return resource.MustParse(DefaultISOStorageSize)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	// Check if we got a successful response
+	if resp.StatusCode != http.StatusOK {
+		logger.V(1).Info("HEAD request returned non-OK status, using default size",
+			"url", imageURL, "status", resp.StatusCode, "default", DefaultISOStorageSize)
+		return resource.MustParse(DefaultISOStorageSize)
+	}
+
+	// Get Content-Length header
+	contentLength := resp.ContentLength
+	if contentLength <= 0 {
+		logger.V(1).Info("Content-Length not available, using default size",
+			"url", imageURL, "default", DefaultISOStorageSize)
+		return resource.MustParse(DefaultISOStorageSize)
+	}
+
+	// Convert bytes to Gi (1 Gi = 1024^3 bytes)
+	const bytesPerGi = 1024 * 1024 * 1024
+
+	// Add 10% buffer for filesystem overhead, then round up to nearest Gi
+	sizeWithBuffer := int64(float64(contentLength) * 1.1)
+	sizeInGi := (sizeWithBuffer + bytesPerGi - 1) / bytesPerGi // Ceiling division
+
+	// Minimum 1Gi
+	if sizeInGi < 1 {
+		sizeInGi = 1
+	}
+
+	sizeStr := fmt.Sprintf("%dGi", sizeInGi)
+	logger.Info("Determined ISO size from Content-Length",
+		"url", imageURL, "contentLengthBytes", contentLength, "allocatedSize", sizeStr)
+
+	return resource.MustParse(sizeStr)
 }
