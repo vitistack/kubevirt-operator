@@ -178,7 +178,7 @@ func (m *NetworkManager) createNetworkAttachmentDefinition(ctx context.Context, 
 	logger := log.FromContext(ctx)
 
 	// Get CNI version from configuration (defaults to "1.0.0")
-	cniVersion := viper.GetString(consts.CNI_VERSION)
+	cniVersion := viper.GetString(consts.NETWORK_ATTACHMENT_DEFINITION_CNI_VERSION)
 	if cniVersion == "" {
 		cniVersion = "1.0.0" // fallback if not set
 	}

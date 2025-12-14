@@ -49,7 +49,7 @@ The operator can be configured using environment variables:
 
 ### Network Configuration
 
-- **`CNI_VERSION`**: CNI version for NetworkAttachmentDefinitions (default: `1.0.0`)
+- **`NETWORK_ATTACHMENT_DEFINITION_CNI_VERSION`**: CNI version for NetworkAttachmentDefinitions (default: `1.0.0`)
 
 ### Operator Configuration
 

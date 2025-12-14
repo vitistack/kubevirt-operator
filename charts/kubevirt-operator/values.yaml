@@ -42,12 +42,15 @@ podSecurityContext:
   fsGroup: 2000
 
 securityContext:
+  allowPrivilegeEscalation: false
   capabilities:
     drop:
       - ALL
   readOnlyRootFilesystem: true
   runAsNonRoot: true
   runAsUser: 1000
+  seccompProfile:
+    type: RuntimeDefault
 
 # This is for setting up a service more information can be found here: https://kubernetes.io/docs/concepts/services-networking/service/
 service:
@@ -125,25 +128,25 @@ affinity: {}
 
 # Operator configuration
 # These settings are passed as environment variables to the operator
-config:
-  # Namespace the operator manages (uses Release.Namespace if empty)
-  namespace: ""
-  # CPU model for VMs: "host-model" (default for x86), "host-passthrough" (required for ARM)
-  cpuModel: ""
-  # CNI version
-  cniVersion: "1.0.0"
-  # Where to fetch public IPs from: "vmi" (default, from KubeVirt VMI) or "networkconfiguration"
-  ipSource: "vmi"
-  # Enable Containerized Data Importer (CDI) support
-  kubevirtSupportCDI: false
-  # Name of the MachineProvider
-  machineProviderName: "kubevirt-provider"
-  # PVC volume mode: "Block" (default) or "Filesystem"
-  pvcVolumeMode: "Block"
-  # Optional prefix for VM names
-  vmNamePrefix: ""
-  # Vitistack name (optional)
-  vitistackName: ""
+
+# Namespace the operator manages (uses Release.Namespace if empty)
+namespace: ""
+# CPU model for VMs: "host-model" (default for x86), "host-passthrough" (required for ARM)
+cpuModel: ""
+# CNI version for NetworkAttachmentDefinitions
+nadCniVersion: "1.0.0"
+# Where to fetch public IPs from: "vmi" (default, from KubeVirt VMI) or "networkconfiguration"
+ipSource: "vmi"
+# Enable Containerized Data Importer (CDI) support
+kubevirtSupportCDI: false
+# Name of the MachineProvider
+machineProviderName: "kubevirt-provider"
+# PVC volume mode: "Block" (default) or "Filesystem"
+pvcVolumeMode: "Block"
+# Optional prefix for VM names
+vmNamePrefix: ""
+# Vitistack name (optional)
+vitistackName: "vitistack"
 
 # Logging configuration
 logging:
