@@ -15,6 +15,9 @@ const (
 	DEFAULT_KUBEVIRT_CONFIG                   = "DEFAULT_KUBEVIRT_CONFIG"
 	VM_NAME_PREFIX                            = "VM_NAME_PREFIX"
 	PVC_VOLUME_MODE                           = "PVC_VOLUME_MODE"
+	// PVC_ACCESS_MODE controls the access mode for PVCs and DataVolumes
+	// Valid values: "ReadWriteOnce" (default), "ReadWriteMany", "ReadOnlyMany"
+	PVC_ACCESS_MODE = "PVC_ACCESS_MODE"
 	// IP_SOURCE controls where public IP addresses are fetched from
 	// Valid values: "vmi" (default, from KubeVirt VMI), "networkconfiguration" (from NetworkConfiguration status)
 	IP_SOURCE                                    = "IP_SOURCE"

@@ -138,11 +138,14 @@ nadCniVersion: "1.0.0"
 # Where to fetch public IPs from: "vmi" (default, from KubeVirt VMI) or "networkconfiguration"
 ipSource: "vmi"
 # Enable Containerized Data Importer (CDI) support
-kubevirtSupportCDI: false
+kubevirtSupportCDI: true
 # Name of the MachineProvider
 machineProviderName: "kubevirt-provider"
 # PVC volume mode: "Block" (default) or "Filesystem"
 pvcVolumeMode: "Block"
+# PVC access mode for DataVolumes: "ReadWriteOnce" (default), "ReadWriteMany", "ReadOnlyMany"
+# Use "ReadWriteOnce" for local-path, Ceph RBD; "ReadWriteMany" for CephFS, NFS
+pvcAccessMode: "ReadWriteOnce"
 # Optional prefix for VM names
 vmNamePrefix: ""
 # Vitistack name (optional)

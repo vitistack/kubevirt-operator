@@ -30,7 +30,8 @@ func Init() {
 	viper.SetDefault(consts.LOG_LEVEL, "info")
 	viper.SetDefault(consts.MANAGED_BY, "kubevirt-operator")
 	viper.SetDefault(consts.VM_NAME_PREFIX, "")
-	viper.SetDefault(consts.PVC_VOLUME_MODE, "Block") // Options: "Block" (default) or "Filesystem"
+	viper.SetDefault(consts.PVC_VOLUME_MODE, "Block")         // Options: "Block" (default) or "Filesystem"
+	viper.SetDefault(consts.PVC_ACCESS_MODE, "ReadWriteOnce") // Options: "ReadWriteOnce" (default), "ReadWriteMany", "ReadOnlyMany"
 	viper.SetDefault(consts.IP_SOURCE, "vmi")
 	viper.SetDefault(consts.KUBEVIRT_SUPPORT_CONTAINERIZED_DATA_IMPORTER, false)
 	viper.SetDefault(consts.NAME_MACHINE_PROVIDER, "kubevirt-provider")

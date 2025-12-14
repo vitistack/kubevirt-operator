@@ -25,7 +25,7 @@ spec:
   # Define disks - the ISO will be attached as a cdrom
   disks:
     - name: "root"
-      sizeGB: 50
+      sizeGB: 20
       boot: true
       type: "virtio"
       encrypted: false

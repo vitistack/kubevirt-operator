@@ -201,6 +201,12 @@ func (m *VMManager) buildDataVolumeTemplates(ctx context.Context, machine *vitis
 	// ISO images require Filesystem volume mode for CDROM
 	filesystemMode := corev1.PersistentVolumeFilesystem
 
+	// Get access mode from config (default: ReadWriteOnce)
+	accessMode := corev1.PersistentVolumeAccessMode(viper.GetString(consts.PVC_ACCESS_MODE))
+	if accessMode == "" {
+		accessMode = corev1.ReadWriteOnce
+	}
+
 	template := kubevirtv1.DataVolumeTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: vmName + "-iso",
@@ -211,6 +217,9 @@ func (m *VMManager) buildDataVolumeTemplates(ctx context.Context, machine *vitis
 		},
 		Spec: cdiv1.DataVolumeSpec{
 			Storage: &cdiv1.StorageSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{
+					accessMode,
+				},
 				Resources: corev1.VolumeResourceRequirements{
 					Requests: corev1.ResourceList{
 						corev1.ResourceStorage: storageSize,
