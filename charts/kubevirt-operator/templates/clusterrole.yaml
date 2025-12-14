@@ -98,9 +98,11 @@ rules:
 - apiGroups:
   - vitistack.io
   resources:
+  - machineclasses
   - machines
   - machineproviders
   - networkconfigurations
+  - networknamespaces
   - vitistacks
   verbs:
   - create
