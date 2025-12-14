@@ -99,7 +99,9 @@ rules:
   - vitistack.io
   resources:
   - machines
+  - machineproviders
   - networkconfigurations
+  - vitistacks
   verbs:
   - create
   - delete
