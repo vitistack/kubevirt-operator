@@ -296,10 +296,6 @@ func (m *StatusManager) updateStatusFromPodVMVMIStatus(ctx context.Context, mach
 		ipSource = "vmi" // Default to VMI
 	}
 
-	vlog.Debug("Using IP source configuration",
-		"ipSource", ipSource,
-		"machine", machine.Name)
-
 	// Populate IP addresses based on configured source
 	switch ipSource {
 	case "networkconfiguration":
@@ -332,11 +328,6 @@ func (m *StatusManager) updateStatusFromPodVMVMIStatus(ctx context.Context, mach
 			machine.Status.NetworkInterfaces = networkInterfaces
 			machine.Status.IPv6Addresses = filterIPv6Addresses(allIpAddresses)
 			machine.Status.IPAddresses = filterIPv4Addresses(allIpAddresses)
-
-			vlog.Debug("Populated IP addresses from NetworkConfiguration",
-				"machine", machine.Name,
-				"publicIPCount", len(publicIPs),
-				"privateIPCount", len(ipAddressesWithNoName))
 		}
 	case "vmi":
 		fallthrough
@@ -509,13 +500,6 @@ func (m *StatusManager) fetchPublicIPsFromNetworkConfiguration(ctx context.Conte
 		// Add both IPv4 and IPv6 addresses
 		publicIPs = append(publicIPs, iface.IPv4Addresses...)
 		publicIPs = append(publicIPs, iface.IPv6Addresses...)
-	}
-
-	if len(publicIPs) > 0 {
-		vlog.Debug("Fetched public IPs from NetworkConfiguration",
-			"machine", machine.Name,
-			"ipCount", len(publicIPs),
-			"ips", publicIPs)
 	}
 
 	return publicIPs, nil
