@@ -12,19 +12,23 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ghcr.io/vitistack/viti-kea-operator
+  IMAGE_NAME: ghcr.io/vitistack/viti-kubevirt-operator
   HELM_REGISTRY: ghcr.io/vitistack/helm
 
 jobs:
   build-image:
     name: Build Image (${{ matrix.platform }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runs_on }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: linux/amd64
             arch: amd64
+            runs_on: ubuntu-latest
+          - platform: linux/arm64
+            arch: arm64
+            runs_on: ubuntu-24.04-arm
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

@@ -74,7 +74,7 @@ This project uses GitHub Actions for continuous integration and delivery:
 - **Build and Tests**: Runs on each push and pull request to verify code integrity.
 - **Security Scan**: Regular vulnerability scanning with govulncheck and CodeQL.
 - **Release Process**: Tagged commits trigger automatic builds and publish to:
-  - Container images: `ghcr.io/vitistack/viti-kea-operator`
+  - Container images: `ghcr.io/vitistack/viti-kubevirt-operator`
   - Helm charts: `oci://ghcr.io/vitistack/helm/kubevirt-operator`
 - **Dependabot**: Automated dependency updates for GitHub Actions, Go modules, Docker, and Helm charts.
 
