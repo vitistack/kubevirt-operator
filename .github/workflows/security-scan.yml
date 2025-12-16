@@ -18,6 +18,16 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Cache security tools
+        uses: actions/cache@v5
+        with:
+          path: |
+            bin/gosec*
+            bin/govulncheck*
+          key: ${{ runner.os }}-security-tools-${{ hashFiles('go.mod', 'go.sum', 'Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-security-tools-
+
       - name: Run gosec
         run: |
           make gosec

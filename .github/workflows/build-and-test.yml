@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: ['main', 'master']
 
+env:
+  GO_VERSION_FILE: go.mod
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -16,8 +19,8 @@ permissions:
 
 # Global caches that can be used across workflow runs
 jobs:
-  buildandtest:
-    name: Build, lint, test and check security
+  build:
+    name: Build
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -28,44 +31,80 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version-file: ${{ env.GO_VERSION_FILE }}
           cache: true
           cache-dependency-path: go.sum
-
-      # Cache bin folder with tools and binaries
-      - name: Cache bin folder
-        uses: actions/cache@v4
-        with:
-          path: bin
-          key: ${{ runner.os }}-bin-${{ hashFiles('go.mod', 'go.sum', 'Makefile') }}
-          restore-keys: |
-            ${{ runner.os }}-bin-
-
-      - name: Install dependencies
-        run: |
-          go mod download
 
       - name: Build
         run: |
           VERSION="${{ github.ref_type == 'tag' && github.ref_name || '0.0.0' }}"
-          VERSION="${VERSION#v*}"
+          VERSION="${VERSION#v}"
           echo "Version $VERSION"
           make build
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Cache golangci-lint
+        uses: actions/cache@v5
+        with:
+          path: |
+            bin/golangci-lint*
+            ~/.cache/golangci-lint
+          key: ${{ runner.os }}-golangci-lint-${{ hashFiles('go.mod', 'go.sum', 'Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-golangci-lint-
 
       - name: Lint
         run: |
           make lint
 
-      - name: Setup test environment
-        run: |
-          if [ ! -d "bin/k8s" ] || [ -z "$(ls -A bin/k8s 2>/dev/null)" ]; then
-            echo "Setting up test environment..."
-            make test-setup
-          else
-            echo "Using cached test environment"
-            # Still run the manifests and generate steps to ensure we have up-to-date resources
-            make manifests generate
-          fi
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Cache envtest binaries
+        uses: actions/cache@v5
+        with:
+          path: bin/k8s
+          key: ${{ runner.os }}-envtest-${{ hashFiles('go.mod', 'go.sum', 'Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-envtest-
+
+      - name: Cache codegen/envtest tools
+        uses: actions/cache@v5
+        with:
+          path: |
+            bin/controller-gen*
+            bin/setup-envtest*
+          key: ${{ runner.os }}-tools-${{ hashFiles('go.mod', 'go.sum', 'Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-tools-
 
       - name: Run tests
         run: |
@@ -73,11 +112,37 @@ jobs:
           go tool cover -func=coverage.out
 
       - name: Upload coverage
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: coverage
           path: coverage.out
           retention-days: 7
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Cache security tools
+        uses: actions/cache@v5
+        with:
+          path: |
+            bin/gosec*
+            bin/govulncheck*
+          key: ${{ runner.os }}-security-tools-${{ hashFiles('go.mod', 'go.sum', 'Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-security-tools-
 
       - name: Run gosec
         run: |
