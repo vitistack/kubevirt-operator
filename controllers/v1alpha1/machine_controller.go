@@ -119,13 +119,21 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Update machine annotations with kubevirt config reference if needed
 	// TODO: Update machine status with kubevirt config reference once field is added to CRD
 	if needsAnnotationUpdate {
+		// Fetch latest version to avoid conflict
+		latestMachine := &vitistackv1alpha1.Machine{}
+		if err := r.Get(ctx, types.NamespacedName{Name: machine.Name, Namespace: machine.Namespace}, latestMachine); err != nil {
+			logger.Error(err, "Failed to get latest machine version for annotation update")
+			return ctrl.Result{}, err
+		}
+		machine = latestMachine
+
 		if machine.Annotations == nil {
 			machine.Annotations = make(map[string]string)
 		}
 		machine.Annotations["vitistack.io/kubevirt-config"] = kubevirtConfigName
 		if err := r.Update(ctx, machine); err != nil {
 			logger.Error(err, "Failed to update machine annotations with kubevirt config")
-			// Continue anyway, we can retry on next reconcile
+			return ctrl.Result{RequeueAfter: RequeueDelay}, err
 		} else {
 			logger.V(1).Info("Automatically assigned KubevirtConfig to machine",
 				"machine", machine.Name,
