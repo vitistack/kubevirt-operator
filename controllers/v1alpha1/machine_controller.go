@@ -156,10 +156,25 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
+	// Log VMI status for debugging
+	if vmiExists {
+		logger.V(1).Info("VMI status",
+			"vm", vmName,
+			"vmiPhase", vmi.Status.Phase,
+			"vmiNodeName", vmi.Status.NodeName)
+	} else {
+		logger.V(1).Info("VMI does not exist yet", "vm", vmName)
+	}
+
 	// Update status from VM/VMI state - this ensures other operators get current info
 	result, err = r.StatusManager.UpdateMachineStatusFromVMAndVMI(ctx, machine, virtualmachine, vmi, vmiExists, remoteClient)
 	if err != nil {
 		logger.Error(err, "Failed to update Machine status from VM/VMI")
+	} else {
+		logger.V(1).Info("Reconcile completed successfully",
+			"machine", machine.Name,
+			"phase", machine.Status.Phase,
+			"state", machine.Status.State)
 	}
 
 	// Always requeue after 5 seconds to keep status fresh for dependent operators
@@ -287,6 +302,7 @@ func (r *MachineReconciler) ensureVirtualMachine(ctx context.Context, machine *v
 			return nil, vmName, ctrl.Result{}, true, err
 		}
 
+		logger.Info("VirtualMachine not found, creating new VM", "vm", vmName, "namespace", machine.Namespace)
 		pvcNames, pvcErr := r.StorageManager.CreatePVCsFromDiskSpecs(ctx, machine, vmName, remoteClient)
 		if pvcErr != nil {
 			logger.Error(pvcErr, "Failed to create PVCs")
@@ -302,6 +318,13 @@ func (r *MachineReconciler) ensureVirtualMachine(ctx context.Context, machine *v
 		logger.Info("Created VirtualMachine in remote cluster", "virtualmachine", newVM.Name)
 		return newVM, vmName, ctrl.Result{}, false, nil
 	}
+
+	// VM already exists, log current status
+	logger.V(1).Info("VirtualMachine already exists on remote cluster",
+		"vm", vmName,
+		"namespace", machine.Namespace,
+		"ready", virtualmachine.Status.Ready,
+		"created", virtualmachine.Status.Created)
 	return virtualmachine, vmName, ctrl.Result{}, false, nil
 }
 
