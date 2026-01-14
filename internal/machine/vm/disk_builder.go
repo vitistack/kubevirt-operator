@@ -55,6 +55,7 @@ func (m *VMManager) buildDisksAndVolumes(machine *vitistackv1alpha1.Machine, pvc
 	volumes := make([]kubevirtv1.Volume, 0, capSize)
 
 	bootorder := uint(1) // Default boot order for the first disk
+	isARM64 := isARM64Architecture(machine)
 
 	// If no disks are specified in the spec, create a default root disk
 	if len(machine.Spec.Disks) == 0 {
@@ -92,7 +93,8 @@ func (m *VMManager) buildDisksAndVolumes(machine *vitistackv1alpha1.Machine, pvc
 		}
 
 		// Determine bus type (virtio is generally preferred for performance)
-		busType := determineBusType(diskSpec.Type)
+		// ARM64 only supports virtio and scsi bus types
+		busType := determineBusType(diskSpec.Type, isARM64)
 
 		disk := kubevirtv1.Disk{
 			Name: diskName,
@@ -129,7 +131,9 @@ func (m *VMManager) buildDisksAndVolumes(machine *vitistackv1alpha1.Machine, pvc
 }
 
 // determineBusType maps disk types to appropriate KubeVirt bus types
-func determineBusType(diskType string) kubevirtv1.DiskBus {
+// ARM64 only supports virtio and scsi bus types (no SATA support)
+// See: https://kubevirt.io/user-guide/cluster_admin/virtual_machines_on_Arm64/
+func determineBusType(diskType string, isARM64 bool) kubevirtv1.DiskBus {
 	if diskType == "" {
 		return BusTypeVirtio
 	}
@@ -138,6 +142,10 @@ func determineBusType(diskType string) kubevirtv1.DiskBus {
 	case "nvme":
 		return BusTypeVirtio // KubeVirt uses virtio for NVMe-style performance
 	case "sata":
+		// ARM64 does not support SATA, fall back to virtio
+		if isARM64 {
+			return BusTypeVirtio
+		}
 		return BusTypeSata
 	case "scsi":
 		return BusTypeScsi
@@ -147,16 +155,25 @@ func determineBusType(diskType string) kubevirtv1.DiskBus {
 }
 
 // addISOBootSource adds an ISO image as a CDROM boot source
-func (m *VMManager) addISOBootSource(disks []kubevirtv1.Disk, volumes []kubevirtv1.Volume, vmName string) ([]kubevirtv1.Disk, []kubevirtv1.Volume) {
+// Note: ARM64 does not support SATA bus for CDROM, so we use SCSI instead
+// See: https://kubevirt.io/user-guide/cluster_admin/virtual_machines_on_Arm64/
+func (m *VMManager) addISOBootSource(disks []kubevirtv1.Disk, volumes []kubevirtv1.Volume, vmName string, machine *vitistackv1alpha1.Machine) ([]kubevirtv1.Disk, []kubevirtv1.Volume) {
 	// Add CDROM disk for ISO with boot order 2 (after root disk)
 	// This allows booting from ISO for installation, but prioritizes
 	// the root disk after OS installation completes
 	bootOrder := uint(2)
+
+	// Determine CDROM bus type - ARM64 only supports SCSI, not SATA
+	cdromBus := BusTypeSata
+	if isARM64Architecture(machine) {
+		cdromBus = BusTypeScsi
+	}
+
 	disks = append(disks, kubevirtv1.Disk{
 		Name: CDROMVolumeName,
 		DiskDevice: kubevirtv1.DiskDevice{
 			CDRom: &kubevirtv1.CDRomTarget{
-				Bus: BusTypeSata,
+				Bus: cdromBus,
 			},
 		},
 		BootOrder: &bootOrder,

@@ -4,6 +4,7 @@ const (
 	DEVELOPMENT                               = "DEVELOPMENT"
 	NAMESPACE                                 = "NAMESPACE"
 	CPU_MODEL                                 = "CPU_MODEL"
+	MACHINE_TYPE                              = "MACHINE_TYPE"
 	NETWORK_ATTACHMENT_DEFINITION_CNI_VERSION = "NETWORK_ATTACHMENT_DEFINITION_CNI_VERSION"
 	LOG_LEVEL                                 = "LOG_LEVEL"
 	LOG_JSON                                  = "LOG_JSON"
@@ -24,4 +25,15 @@ const (
 	KUBEVIRT_SUPPORT_CONTAINERIZED_DATA_IMPORTER = "KUBEVIRT_SUPPORT_CONTAINERIZED_DATA_IMPORTER"
 	VITISTACK_NAME                               = "VITISTACK_NAME"
 	NAME_MACHINE_PROVIDER                        = "NAME_MACHINE_PROVIDER"
+
+	// Architecture constants
+	ArchARM64 = "arm64"
+	ArchAMD64 = "amd64"
+
+	// Machine type constants for KubeVirt
+	// ARM64 only supports "virt" machine type
+	// x86_64/amd64 typically uses "pc-q35" (modern) or "pc-i440fx" (legacy)
+	MachineTypeVirt   = "virt"
+	MachineTypeQ35    = "q35"
+	MachineTypeI440FX = "pc-i440fx"
 )

@@ -16,14 +16,22 @@ var (
 
 func Init() {
 	// Initialize settings here
-	// Set CPU model based on architecture
-	cpuModel := "host-model" // default for non-ARM architectures
+	// Set CPU model and machine type based on architecture
+	// ARM64 requirements: https://kubevirt.io/user-guide/cluster_admin/virtual_machines_on_Arm64/
+	cpuModel := "host-model"             // default for non-ARM architectures
+	machineType := consts.MachineTypeQ35 // default for x86_64/amd64
+
 	if runtime.GOARCH == "arm64" || runtime.GOARCH == "arm" {
+		// ARM64 specific settings:
+		// - CPU model must be "host-passthrough" (only supported model on ARM64)
+		// - Machine type must be "virt" (only supported machine type on ARM64)
 		cpuModel = "host-passthrough"
+		machineType = consts.MachineTypeVirt
 	}
 
 	viper.SetDefault(consts.DEVELOPMENT, false)
 	viper.SetDefault(consts.CPU_MODEL, cpuModel)
+	viper.SetDefault(consts.MACHINE_TYPE, machineType)
 	viper.SetDefault(consts.NETWORK_ATTACHMENT_DEFINITION_CNI_VERSION, "1.0.0")
 	viper.SetDefault(consts.NAMESPACE, "default")
 	viper.SetDefault(consts.LOG_JSON, true)

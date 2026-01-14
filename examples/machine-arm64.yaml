@@ -1,0 +1,79 @@
+---
+# Example: ARM64 Virtual Machine
+# This example shows how to create a VM that runs on ARM64 architecture
+# Reference: https://kubevirt.io/user-guide/cluster_admin/virtual_machines_on_Arm64/
+#
+# ARM64 specific configurations that are automatically applied:
+# - Machine type: "virt" (only supported machine type on ARM64)
+# - CPU model: "host-passthrough" (only supported CPU model on ARM64)
+# - Disk bus: virtio or scsi only (SATA not supported)
+# - CDROM bus: scsi (SATA not supported)
+# - UEFI boot: enabled by default (only boot method supported)
+# - SecureBoot: disabled (not supported on ARM64)
+#
+# ARM64 limitations:
+# - Hugepages are not supported
+# - KVM and Hyper-V timers are not supported
+# - VGA devices are not supported (virtio-gpu is used)
+# - Watchdog device is not supported
+# - macvlan network is not supported
+# - NUMA features are not supported (due to Hugepages dependency)
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-machine-arm64
+spec:
+  name: "example-vm-arm64"
+  machineClass: "small"
+  provider: kubevirt
+
+  # Specify ARM64 architecture
+  os:
+    family: linux
+    distribution: ubuntu
+    version: "24.04"
+    architecture: arm64  # This triggers ARM64-specific configurations
+
+  # Disk configuration - only virtio and scsi are supported on ARM64
+  # SATA will be automatically converted to virtio on ARM64
+  disks:
+    - name: root
+      sizeGB: 20
+      boot: true
+      type: virtio  # Recommended for ARM64
+
+  # Network configuration
+  network:
+    assignPublicIP: false
+    interfaces:
+      - name: eth0
+        primary: true
+---
+# Example: ARM64 VM with SCSI disks
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-machine-arm64-scsi
+spec:
+  name: "example-vm-arm64-scsi"
+  machineClass: "medium"
+  provider: kubevirt
+
+  os:
+    family: linux
+    distribution: debian
+    version: "12"
+    architecture: arm64
+
+  # Using SCSI disk bus (also supported on ARM64)
+  disks:
+    - name: root
+      sizeGB: 40
+      boot: true
+      type: scsi
+
+  network:
+    assignPublicIP: false
+    interfaces:
+      - name: eth0
+        primary: true

@@ -82,6 +82,19 @@ type vmBuildParams struct {
 func (m *VMManager) buildVMSpec(ctx context.Context, params *vmBuildParams) *kubevirtv1.VirtualMachine {
 	runStrategy := kubevirtv1.RunStrategyAlways
 	cpuModel := viper.GetString(consts.CPU_MODEL)
+	machineType := viper.GetString(consts.MACHINE_TYPE)
+
+	// Check if a specific architecture is requested in the machine spec
+	// and set ARM64 defaults only when CPU_MODEL is not explicitly configured
+	if isARM64Architecture(params.machine) {
+		// Only override CPU model if not explicitly set via environment
+		// This allows users to experiment with different CPU models on ARM64
+		if !viper.IsSet(consts.CPU_MODEL) {
+			cpuModel = "host-passthrough" // ARM64 default (KubeVirt typically requires this)
+		}
+		// Always use "virt" machine type for ARM64
+		machineType = consts.MachineTypeVirt
+	}
 
 	return &kubevirtv1.VirtualMachine{
 		ObjectMeta: metav1.ObjectMeta{
@@ -113,10 +126,13 @@ func (m *VMManager) buildVMSpec(ctx context.Context, params *vmBuildParams) *kub
 						Memory: &kubevirtv1.Memory{
 							Guest: ptr.To(resource.MustParse(params.memoryRequest)),
 						},
+						Machine: &kubevirtv1.Machine{
+							Type: machineType,
+						},
 						Firmware: &kubevirtv1.Firmware{
 							Bootloader: &kubevirtv1.Bootloader{
 								EFI: &kubevirtv1.EFI{
-									// SecureBoot disabled for broader OS compatibility
+									// SecureBoot disabled - not supported on ARM64 and disabled for broader OS compatibility
 									SecureBoot: ptr.To(false),
 								},
 							},
@@ -144,6 +160,12 @@ func (m *VMManager) buildVMSpec(ctx context.Context, params *vmBuildParams) *kub
 	}
 }
 
+// isARM64Architecture checks if the machine spec requests ARM64 architecture
+func isARM64Architecture(machine *vitistackv1alpha1.Machine) bool {
+	arch := machine.Spec.OS.Architecture
+	return arch == consts.ArchARM64 || arch == "aarch64"
+}
+
 // CreateVirtualMachine creates a KubeVirt VirtualMachine with the specified disks and volumes
 func (m *VMManager) CreateVirtualMachine(
 	ctx context.Context,
@@ -156,7 +178,7 @@ func (m *VMManager) CreateVirtualMachine(
 
 	// Add boot source (ISO) if specified
 	if machine.Annotations[AnnotationBootSource] == BootSourceDataVolume && machine.Spec.OS.ImageID != "" {
-		disks, volumes = m.addISOBootSource(disks, volumes, vmName)
+		disks, volumes = m.addISOBootSource(disks, volumes, vmName, machine)
 	}
 
 	// Calculate resource requirements (validates MachineClass from supervisor cluster)
