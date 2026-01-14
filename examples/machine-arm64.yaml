@@ -32,7 +32,7 @@ spec:
     family: linux
     distribution: ubuntu
     version: "24.04"
-    architecture: arm64  # This triggers ARM64-specific configurations
+    architecture: arm64 # This triggers ARM64-specific configurations
 
   # Disk configuration - only virtio and scsi are supported on ARM64
   # SATA will be automatically converted to virtio on ARM64
@@ -40,7 +40,7 @@ spec:
     - name: root
       sizeGB: 20
       boot: true
-      type: virtio  # Recommended for ARM64
+      type: virtio # Recommended for ARM64
 
   # Network configuration
   network:
