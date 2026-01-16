@@ -150,6 +150,9 @@ pvcVolumeMode: "Block"
 # PVC access mode for DataVolumes: "ReadWriteOnce" (default), "ReadWriteMany", "ReadOnlyMany"
 # Use "ReadWriteOnce" for local-path, Ceph RBD; "ReadWriteMany" for CephFS, NFS
 pvcAccessMode: "ReadWriteOnce"
+# Storage class name for PVCs. If empty (default), uses the cluster's default storage class.
+# Set this to a specific storage class name to override the default (e.g., "local-path", "ceph-rbd")
+storageClassName: ""
 # Optional prefix for VM names
 vmNamePrefix: ""
 # Vitistack name (optional)

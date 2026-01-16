@@ -18,6 +18,9 @@ const (
 	// PVC_ACCESS_MODE controls the access mode for PVCs and DataVolumes
 	// Valid values: "ReadWriteOnce" (default), "ReadWriteMany", "ReadOnlyMany"
 	PVC_ACCESS_MODE = "PVC_ACCESS_MODE"
+	// STORAGE_CLASS_NAME allows specifying a storage class to use for PVCs
+	// If empty (default), the cluster's default storage class will be used
+	STORAGE_CLASS_NAME = "STORAGE_CLASS_NAME"
 	// IP_SOURCE controls where public IP addresses are fetched from
 	// Valid values: "vmi" (default, from KubeVirt VMI), "networkconfiguration" (from NetworkConfiguration status)
 	IP_SOURCE                                    = "IP_SOURCE"

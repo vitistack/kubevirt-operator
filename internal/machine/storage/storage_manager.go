@@ -78,10 +78,17 @@ func (m *StorageManager) GetDefaultStorageClass(ctx context.Context, clusterClie
 func (m *StorageManager) CreatePVCsFromDiskSpecs(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string, remoteClient client.Client) ([]string, error) {
 	logger := log.FromContext(ctx)
 
-	// Get default storage class from the remote KubeVirt cluster
-	defaultStorageClass, err := m.GetDefaultStorageClass(ctx, remoteClient)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get default storage class: %w", err)
+	// Check if a storage class is explicitly configured
+	storageClass := viper.GetString(consts.STORAGE_CLASS_NAME)
+	if storageClass != "" {
+		logger.Info("Using configured storage class", "storageClass", storageClass)
+	} else {
+		// Get default storage class from the remote KubeVirt cluster
+		var err error
+		storageClass, err = m.GetDefaultStorageClass(ctx, remoteClient)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get default storage class: %w", err)
+		}
 	}
 
 	pvcNames := make([]string, 0, max(1, len(machine.Spec.Disks)))
@@ -89,7 +96,7 @@ func (m *StorageManager) CreatePVCsFromDiskSpecs(ctx context.Context, machine *v
 	// If no disks are specified in the spec, create a default root disk
 	if len(machine.Spec.Disks) == 0 {
 		pvcName := vmName
-		if err := m.createSinglePVC(ctx, machine, pvcName, "10Gi", defaultStorageClass, true, remoteClient); err != nil {
+		if err := m.createSinglePVC(ctx, machine, pvcName, "10Gi", storageClass, true, remoteClient); err != nil {
 			return nil, fmt.Errorf("failed to create default root PVC: %w", err)
 		}
 		pvcNames = append(pvcNames, pvcName)
@@ -115,7 +122,7 @@ func (m *StorageManager) CreatePVCsFromDiskSpecs(ctx context.Context, machine *v
 		// Convert sizeGB to storage size string
 		storageSize := fmt.Sprintf("%dGi", disk.SizeGB)
 
-		if err := m.createSinglePVC(ctx, machine, pvcName, storageSize, defaultStorageClass, disk.Boot, remoteClient); err != nil {
+		if err := m.createSinglePVC(ctx, machine, pvcName, storageSize, storageClass, disk.Boot, remoteClient); err != nil {
 			return nil, fmt.Errorf("failed to create PVC %s: %w", pvcName, err)
 		}
 

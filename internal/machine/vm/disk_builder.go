@@ -207,6 +207,9 @@ func (m *VMManager) buildDataVolumeTemplates(ctx context.Context, machine *vitis
 		accessMode = corev1.ReadWriteOnce
 	}
 
+	// Get storage class from config (empty means use cluster default)
+	storageClassName := viper.GetString(consts.STORAGE_CLASS_NAME)
+
 	template := kubevirtv1.DataVolumeTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: vmName + "-iso",
@@ -228,6 +231,12 @@ func (m *VMManager) buildDataVolumeTemplates(ctx context.Context, machine *vitis
 				VolumeMode: &filesystemMode,
 			},
 		},
+	}
+
+	// Set storage class if explicitly configured
+	if storageClassName != "" {
+		template.Spec.Storage.StorageClassName = &storageClassName
+		logger.V(1).Info("Using configured storage class for DataVolume", "storageClass", storageClassName)
 	}
 
 	// Build the DataVolume source based on type

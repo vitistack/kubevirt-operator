@@ -32,6 +32,7 @@ func Init() {
 	viper.SetDefault(consts.VM_NAME_PREFIX, "")
 	viper.SetDefault(consts.PVC_VOLUME_MODE, "Block")         // Options: "Block" (default) or "Filesystem"
 	viper.SetDefault(consts.PVC_ACCESS_MODE, "ReadWriteOnce") // Options: "ReadWriteOnce" (default), "ReadWriteMany", "ReadOnlyMany"
+	viper.SetDefault(consts.STORAGE_CLASS_NAME, "")           // Empty means use cluster's default storage class
 	viper.SetDefault(consts.IP_SOURCE, "vmi")
 	viper.SetDefault(consts.KUBEVIRT_SUPPORT_CONTAINERIZED_DATA_IMPORTER, false)
 	viper.SetDefault(consts.NAME_MACHINE_PROVIDER, "kubevirt-provider")

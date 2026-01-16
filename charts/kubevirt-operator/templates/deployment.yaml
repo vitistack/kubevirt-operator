@@ -68,6 +68,10 @@ spec:
               value: {{ .Values.pvcVolumeMode | quote }}
             - name: PVC_ACCESS_MODE
               value: {{ .Values.pvcAccessMode | quote }}
+            {{- if .Values.storageClassName }}
+            - name: STORAGE_CLASS_NAME
+              value: {{ .Values.storageClassName | quote }}
+            {{- end }}
             {{- if .Values.vmNamePrefix }}
             - name: VM_NAME_PREFIX
               value: {{ .Values.vmNamePrefix | quote }}
