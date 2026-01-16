@@ -37,14 +37,14 @@ func CheckCRDCompatibility(ctx context.Context, clientMgr clients.ClientManager,
 
 	supervisorClient := clientMgr.GetSupervisorClient()
 
-	// vitistack.io CRDs should match between supervisor and remote clusters
+	// vitistack.io CRDs
 	vitistackCRDs := []string{
 		"machines.vitistack.io",
 		"networkconfigurations.vitistack.io",
 		"kubevirtconfigs.vitistack.io",
 	}
 
-	// Get supervisor vitistack.io CRD schemas as baseline
+	// Verify vitistack.io CRDs
 	supervisorSchemas, err := getCRDSchemas(ctx, supervisorClient, vitistackCRDs)
 	if err != nil {
 		vlog.Warn(fmt.Sprintf("⚠️  Failed to fetch vitistack.io CRD schemas from supervisor cluster: %s", err.Error()))
@@ -53,73 +53,10 @@ func CheckCRDCompatibility(ctx context.Context, clientMgr clients.ClientManager,
 
 	vlog.Info(fmt.Sprintf("✅ Supervisor cluster has %d vitistack.io CRDs", len(supervisorSchemas)))
 
-	// Compare each remote cluster's vitistack.io CRDs against supervisor
-	for i := range configs {
-		config := &configs[i]
-		compareRemoteVitistackCRDs(ctx, clientMgr, config, vitistackCRDs, supervisorSchemas)
-	}
-
 	// Check kubevirt.io CRD versions across remote clusters
 	checkKubevirtCRDVersions(ctx, clientMgr, configs)
 
 	vlog.Info("✅ CRD compatibility check completed")
-}
-
-// compareRemoteVitistackCRDs compares vitistack.io CRDs between supervisor and a remote cluster
-func compareRemoteVitistackCRDs(ctx context.Context, clientMgr clients.ClientManager, config *vitistackv1alpha1.KubevirtConfig, crdNames []string, supervisorSchemas map[string]*unstructured.Unstructured) {
-	vlog.Info(fmt.Sprintf("Comparing vitistack.io CRDs on cluster: %s", config.Name))
-
-	// Get client for this cluster
-	remoteClient, err := clientMgr.GetClientForConfig(ctx, config.Name)
-	if err != nil {
-		vlog.Warn(fmt.Sprintf("⚠️  Cluster '%s': Failed to get client for CRD comparison: %s", config.Name, err.Error()))
-		return
-	}
-
-	// Get remote vitistack.io CRD schemas
-	remoteSchemas, err := getCRDSchemas(ctx, remoteClient, crdNames)
-	if err != nil {
-		vlog.Warn(fmt.Sprintf("⚠️  Cluster '%s': Failed to fetch vitistack.io CRD schemas: %s", config.Name, err.Error()))
-		return
-	}
-
-	// Compare schemas
-	for _, crdName := range crdNames {
-		supervisorCRD, hasSupervisor := supervisorSchemas[crdName]
-		remoteCRD, hasRemote := remoteSchemas[crdName]
-
-		if !hasSupervisor && !hasRemote {
-			vlog.Warn(fmt.Sprintf("⚠️  Cluster '%s': CRD '%s' not found in either cluster", config.Name, crdName))
-			continue
-		}
-
-		if !hasRemote {
-			vlog.Warn(fmt.Sprintf("⚠️  Cluster '%s': CRD '%s' exists on supervisor but not on remote cluster", config.Name, crdName))
-			continue
-		}
-
-		if !hasSupervisor {
-			vlog.Warn(fmt.Sprintf("⚠️  Cluster '%s': CRD '%s' exists on remote but not on supervisor cluster", config.Name, crdName))
-			continue
-		}
-
-		// Compare versions
-		supervisorVersion := extractCRDVersion(supervisorCRD)
-		remoteVersion := extractCRDVersion(remoteCRD)
-
-		if supervisorVersion != remoteVersion {
-			vlog.Warn(fmt.Sprintf("⚠️  Cluster '%s': CRD '%s' version mismatch - Supervisor: %s, Remote: %s",
-				config.Name, crdName, supervisorVersion, remoteVersion))
-		} else {
-			vlog.Info(fmt.Sprintf("✅ Cluster '%s': CRD '%s' version matches supervisor: %s",
-				config.Name, crdName, supervisorVersion))
-		}
-
-		// Compare schema properties (basic check)
-		if !compareCRDSchemas(supervisorCRD, remoteCRD) {
-			vlog.Warn(fmt.Sprintf("⚠️  Cluster '%s': CRD '%s' schema differs from supervisor cluster", config.Name, crdName))
-		}
-	}
 }
 
 // checkKubevirtCRDVersions checks kubevirt.io CRD version consistency across remote clusters
@@ -165,48 +102,6 @@ func checkKubevirtCRDVersions(ctx context.Context, clientMgr clients.ClientManag
 		// Compare with baseline
 		compareKubevirtCRDVersions(config.Name, baselineClusterName, baselineKubevirtVersions, remoteVersions)
 	}
-}
-
-// extractCRDVersion extracts version from a CRD object
-func extractCRDVersion(crd *unstructured.Unstructured) string {
-	// Try stored versions first
-	storedVersions, found, err := unstructured.NestedSlice(crd.Object, "status", "storedVersions")
-	if err == nil && found && len(storedVersions) > 0 {
-		if version, ok := storedVersions[0].(string); ok {
-			return version
-		}
-	}
-
-	// Fallback to spec.versions
-	versions, found, err := unstructured.NestedSlice(crd.Object, "spec", "versions")
-	if err == nil && found && len(versions) > 0 {
-		if versionMap, ok := versions[0].(map[string]interface{}); ok {
-			if version, ok := versionMap["name"].(string); ok {
-				return version
-			}
-		}
-	}
-
-	return "unknown"
-}
-
-// compareCRDSchemas compares two CRD schemas for compatibility
-func compareCRDSchemas(crd1, crd2 *unstructured.Unstructured) bool {
-	// Get spec.versions from both CRDs
-	versions1, found1, err1 := unstructured.NestedSlice(crd1.Object, "spec", "versions")
-	versions2, found2, err2 := unstructured.NestedSlice(crd2.Object, "spec", "versions")
-
-	if err1 != nil || !found1 || err2 != nil || !found2 {
-		return true // Can't compare, assume compatible
-	}
-
-	if len(versions1) != len(versions2) {
-		return false // Different number of versions
-	}
-
-	// For now, just check if the number of versions match
-	// A more thorough comparison would check actual schema properties
-	return true
 }
 
 // compareKubevirtCRDVersions compares KubeVirt CRD versions between remote clusters
