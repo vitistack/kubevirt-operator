@@ -44,3 +44,6 @@ main
 
 .env*
 !.env.example
+
+# SBOM output
+sbom/
