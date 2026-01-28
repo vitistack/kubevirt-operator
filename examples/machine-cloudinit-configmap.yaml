@@ -1,0 +1,74 @@
+---
+# Example: Machine with cloud-init from a ConfigMap
+# Useful for non-sensitive configuration that can be shared across VMs
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-cloudinit-configmap
+spec:
+  machineClass: "medium"
+  name: "cloudinit-configmap-vm"
+  provider: kubevirt
+
+  os:
+    family: linux
+    distribution: ubuntu
+    version: "24.04"
+    architecture: amd64
+    imageID: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+
+  disks:
+    - name: "root"
+      sizeGB: 20
+      boot: true
+      type: "virtio"
+
+  # Cloud-init configuration referencing a ConfigMap
+  cloudInit:
+    type: noCloud
+    userDataConfigMapRef:
+      name: vm-cloudinit-config
+      key: userdata # Optional, defaults to "userdata"
+    # Optionally also reference network data from another ConfigMap
+    networkDataConfigMapRef:
+      name: vm-network-config
+      key: networkdata
+
+---
+# ConfigMap containing cloud-init user data
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vm-cloudinit-config
+data:
+  userdata: |
+    #cloud-config
+    hostname: cloudinit-configmap-vm
+    users:
+      - name: admin
+        sudo: ALL=(ALL) NOPASSWD:ALL
+        shell: /bin/bash
+        ssh_authorized_keys:
+          - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ... your-ssh-key
+    packages:
+      - curl
+      - vim
+      - docker.io
+    runcmd:
+      - systemctl enable docker
+      - systemctl start docker
+      - usermod -aG docker admin
+
+---
+# ConfigMap containing cloud-init network data (v2 format)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vm-network-config
+data:
+  networkdata: |
+    version: 2
+    ethernets:
+      enp1s0:
+        dhcp4: true
+        dhcp6: false

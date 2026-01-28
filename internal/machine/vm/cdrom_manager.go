@@ -50,8 +50,11 @@ const (
 	// AnnotationBootSource indicates the boot source type (from Machine spec)
 	AnnotationBootSource = "kubevirt.io/boot-source"
 
-	// BootSourceDataVolume indicates the VM boots from a DataVolume (ISO)
+	// BootSourceDataVolume indicates the VM boots from a DataVolume (ISO as CDROM)
 	BootSourceDataVolume = "datavolume"
+
+	// BootSourceCloudImage indicates the VM boots from a cloud image (qcow2) imported to root disk
+	BootSourceCloudImage = "cloudimage"
 
 	// AnnotationValueTrue is the string value for true annotations
 	AnnotationValueTrue = "true"

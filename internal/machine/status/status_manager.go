@@ -450,31 +450,45 @@ func extractNetworkInterfacesFromVMI(vmi *kubevirtv1.VirtualMachineInstance, net
 }
 
 func extractDiskVolumesFromVMI(vmi *kubevirtv1.VirtualMachineInstance) ([]vitistackv1alpha1.MachineStatusDisk, error) {
-	var diskVolumes []vitistackv1alpha1.MachineStatusDisk
+	if vmi == nil {
+		return nil, nil
+	}
+	diskVolumes := make([]vitistackv1alpha1.MachineStatusDisk, 0, len(vmi.Status.VolumeStatus))
 	for i := range vmi.Status.VolumeStatus {
 		volume := &vmi.Status.VolumeStatus[i]
-		if volume.Name != "" {
-
-			diskSize, ok := volume.PersistentVolumeClaimInfo.Capacity.Storage().AsInt64()
-			if !ok {
-				return nil, fmt.Errorf("failed to get disk size for volume %s", volume.Name)
-			}
-
-			accessModes := []string{}
-			for j := range volume.PersistentVolumeClaimInfo.AccessModes {
-				mode := volume.PersistentVolumeClaimInfo.AccessModes[j]
-				accessModes = append(accessModes, string(mode))
-			}
-
-			diskVolumes = append(diskVolumes, vitistackv1alpha1.MachineStatusDisk{
-				Name:        volume.Name,
-				Device:      fmt.Sprintf("/dev/%s", volume.Target),
-				PVCName:     volume.PersistentVolumeClaimInfo.ClaimName,
-				VolumeMode:  string(*volume.PersistentVolumeClaimInfo.VolumeMode),
-				Size:        diskSize,
-				AccessModes: accessModes,
-			})
+		if volume.Name == "" {
+			continue
 		}
+
+		// Skip volumes without PersistentVolumeClaimInfo (e.g., container disks, cloud-init)
+		if volume.PersistentVolumeClaimInfo == nil {
+			continue
+		}
+
+		diskSize, ok := volume.PersistentVolumeClaimInfo.Capacity.Storage().AsInt64()
+		if !ok {
+			return nil, fmt.Errorf("failed to get disk size for volume %s", volume.Name)
+		}
+
+		accessModes := []string{}
+		for j := range volume.PersistentVolumeClaimInfo.AccessModes {
+			mode := volume.PersistentVolumeClaimInfo.AccessModes[j]
+			accessModes = append(accessModes, string(mode))
+		}
+
+		volumeMode := ""
+		if volume.PersistentVolumeClaimInfo.VolumeMode != nil {
+			volumeMode = string(*volume.PersistentVolumeClaimInfo.VolumeMode)
+		}
+
+		diskVolumes = append(diskVolumes, vitistackv1alpha1.MachineStatusDisk{
+			Name:        volume.Name,
+			Device:      fmt.Sprintf("/dev/%s", volume.Target),
+			PVCName:     volume.PersistentVolumeClaimInfo.ClaimName,
+			VolumeMode:  volumeMode,
+			Size:        diskSize,
+			AccessModes: accessModes,
+		})
 	}
 	return diskVolumes, nil
 }

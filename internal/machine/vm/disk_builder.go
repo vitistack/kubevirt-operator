@@ -43,6 +43,27 @@ const (
 	SourceTypeHTTP = "http"
 )
 
+// getBootDiskSizeFromSpec returns the size of the boot disk from the machine spec.
+// Returns zero quantity if no boot disk is found or size is not specified.
+func getBootDiskSizeFromSpec(machine *vitistackv1alpha1.Machine) resource.Quantity {
+	for _, disk := range machine.Spec.Disks {
+		if disk.Boot && disk.SizeGB > 0 {
+			return resource.MustParse(fmt.Sprintf("%dGi", disk.SizeGB))
+		}
+	}
+	// If no explicit boot disk, check for a "root" named disk
+	for _, disk := range machine.Spec.Disks {
+		if disk.Name == "root" && disk.SizeGB > 0 {
+			return resource.MustParse(fmt.Sprintf("%dGi", disk.SizeGB))
+		}
+	}
+	// If there's only one disk, use that
+	if len(machine.Spec.Disks) == 1 && machine.Spec.Disks[0].SizeGB > 0 {
+		return resource.MustParse(fmt.Sprintf("%dGi", machine.Spec.Disks[0].SizeGB))
+	}
+	return resource.Quantity{}
+}
+
 // buildDisksAndVolumes creates disk and volume specifications for the VM
 func (m *VMManager) buildDisksAndVolumes(machine *vitistackv1alpha1.Machine, pvcNames []string) ([]kubevirtv1.Disk, []kubevirtv1.Volume) {
 	l := len(machine.Spec.Disks)
@@ -56,6 +77,9 @@ func (m *VMManager) buildDisksAndVolumes(machine *vitistackv1alpha1.Machine, pvc
 
 	bootorder := uint(1) // Default boot order for the first disk
 
+	// Check if using cloud image boot source
+	isCloudImageBoot := machine.Annotations[AnnotationBootSource] == BootSourceCloudImage && machine.Spec.OS.ImageID != ""
+
 	// If no disks are specified in the spec, create a default root disk
 	if len(machine.Spec.Disks) == 0 {
 		disks = append(disks, kubevirtv1.Disk{
@@ -68,15 +92,28 @@ func (m *VMManager) buildDisksAndVolumes(machine *vitistackv1alpha1.Machine, pvc
 			BootOrder: &bootorder,
 		})
 
-		volumes = append(volumes, kubevirtv1.Volume{
-			Name: "root",
-			VolumeSource: kubevirtv1.VolumeSource{
+		var volumeSource kubevirtv1.VolumeSource
+		if isCloudImageBoot {
+			// Cloud image: use DataVolume source (DataVolumeTemplate will create the PVC)
+			volumeSource = kubevirtv1.VolumeSource{
+				DataVolume: &kubevirtv1.DataVolumeSource{
+					Name: pvcNames[0], // Same name as vmName
+				},
+			}
+		} else {
+			// Regular PVC
+			volumeSource = kubevirtv1.VolumeSource{
 				PersistentVolumeClaim: &kubevirtv1.PersistentVolumeClaimVolumeSource{
 					PersistentVolumeClaimVolumeSource: corev1.PersistentVolumeClaimVolumeSource{
 						ClaimName: pvcNames[0],
 					},
 				},
-			},
+			}
+		}
+
+		volumes = append(volumes, kubevirtv1.Volume{
+			Name:         "root",
+			VolumeSource: volumeSource,
 		})
 
 		return disks, volumes
@@ -111,15 +148,28 @@ func (m *VMManager) buildDisksAndVolumes(machine *vitistackv1alpha1.Machine, pvc
 
 		disks = append(disks, disk)
 
-		volume := kubevirtv1.Volume{
-			Name: diskName,
-			VolumeSource: kubevirtv1.VolumeSource{
+		var volumeSource kubevirtv1.VolumeSource
+		if diskSpec.Boot && isCloudImageBoot {
+			// Boot disk with cloud image: use DataVolume source
+			volumeSource = kubevirtv1.VolumeSource{
+				DataVolume: &kubevirtv1.DataVolumeSource{
+					Name: pvcNames[i], // Same name as vmName for boot disk
+				},
+			}
+		} else {
+			// Regular PVC
+			volumeSource = kubevirtv1.VolumeSource{
 				PersistentVolumeClaim: &kubevirtv1.PersistentVolumeClaimVolumeSource{
 					PersistentVolumeClaimVolumeSource: corev1.PersistentVolumeClaimVolumeSource{
 						ClaimName: pvcNames[i],
 					},
 				},
-			},
+			}
+		}
+
+		volume := kubevirtv1.Volume{
+			Name:         diskName,
+			VolumeSource: volumeSource,
 		}
 
 		volumes = append(volumes, volume)
@@ -179,12 +229,19 @@ func (m *VMManager) addISOBootSource(disks []kubevirtv1.Disk, volumes []kubevirt
 	return disks, volumes
 }
 
-// buildDataVolumeTemplates creates DataVolume templates for ISO boot
+// buildDataVolumeTemplates creates DataVolume templates for boot sources
+// For BootSourceDataVolume (ISO): creates a CDROM DataVolume
+// For BootSourceCloudImage: creates a root disk DataVolume with the cloud image
 func (m *VMManager) buildDataVolumeTemplates(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string) []kubevirtv1.DataVolumeTemplateSpec {
 	logger := log.FromContext(ctx)
 
 	bootSourceType := machine.Annotations[AnnotationBootSource]
-	if bootSourceType != BootSourceDataVolume || machine.Spec.OS.ImageID == "" {
+	if machine.Spec.OS.ImageID == "" {
+		return nil
+	}
+
+	// Only handle datavolume (ISO) and cloudimage boot sources
+	if bootSourceType != BootSourceDataVolume && bootSourceType != BootSourceCloudImage {
 		return nil
 	}
 
@@ -194,12 +251,15 @@ func (m *VMManager) buildDataVolumeTemplates(ctx context.Context, machine *vitis
 		sourceType = SourceTypeHTTP // Default to HTTP
 	}
 
-	// Try to get the actual ISO size, fall back to default 8Gi
-	storageSize := getISOStorageSize(ctx, machine.Spec.OS.ImageID, sourceType)
-	logger.V(1).Info("Determined ISO storage size", "url", machine.Spec.OS.ImageID, "size", storageSize.String())
-
-	// ISO images require Filesystem volume mode for CDROM
-	filesystemMode := corev1.PersistentVolumeFilesystem
+	// For cloud images (qcow2), we need the boot disk size from the spec, not the compressed image size.
+	// The qcow2 image will be expanded to the virtual disk size during import.
+	// First, try to get the boot disk size from the machine spec.
+	storageSize := getBootDiskSizeFromSpec(machine)
+	if storageSize.IsZero() {
+		// Fall back to calculating from image URL (for ISO images)
+		storageSize = getISOStorageSize(ctx, machine.Spec.OS.ImageID, sourceType)
+	}
+	logger.V(1).Info("Determined boot image storage size", "url", machine.Spec.OS.ImageID, "size", storageSize.String())
 
 	// Get access mode from config (default: ReadWriteOnce)
 	accessMode := corev1.PersistentVolumeAccessMode(viper.GetString(consts.PVC_ACCESS_MODE))
@@ -210,9 +270,26 @@ func (m *VMManager) buildDataVolumeTemplates(ctx context.Context, machine *vitis
 	// Get storage class from config (empty means use cluster default)
 	storageClassName := viper.GetString(consts.STORAGE_CLASS_NAME)
 
+	// Determine DataVolume name and volume mode based on boot source type
+	var dvName string
+	var volumeMode corev1.PersistentVolumeMode
+	if bootSourceType == BootSourceCloudImage {
+		// Cloud image: use root disk name (same as vmName for boot disk)
+		dvName = vmName
+		// Cloud images should use Block mode for better performance (or Filesystem if needed)
+		volumeMode = corev1.PersistentVolumeBlock
+		logger.Info("Creating cloud image DataVolume for root disk", "name", dvName, "size", storageSize.String())
+	} else {
+		// ISO boot: use separate CDROM volume
+		dvName = vmName + "-iso"
+		// ISO images require Filesystem volume mode for CDROM
+		volumeMode = corev1.PersistentVolumeFilesystem
+		logger.Info("Creating ISO DataVolume for CDROM boot", "name", dvName, "size", storageSize.String())
+	}
+
 	template := kubevirtv1.DataVolumeTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: vmName + "-iso",
+			Name: dvName,
 			Labels: map[string]string{
 				vitistackv1alpha1.ManagedByAnnotation: viper.GetString(consts.MANAGED_BY),
 				"vitistack.io/source-machine":         machine.Name,
@@ -228,7 +305,7 @@ func (m *VMManager) buildDataVolumeTemplates(ctx context.Context, machine *vitis
 						corev1.ResourceStorage: storageSize,
 					},
 				},
-				VolumeMode: &filesystemMode,
+				VolumeMode: &volumeMode,
 			},
 		},
 	}

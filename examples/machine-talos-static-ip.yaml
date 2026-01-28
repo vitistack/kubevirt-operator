@@ -1,0 +1,166 @@
+---
+# Example: Talos Linux v1.12.2 with static IPv4 using cloud-init
+# Talos supports cloud-init for initial network configuration during boot
+# The machine config (talosconfig) is typically applied via talosctl after boot
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-talos-static-ip
+  annotations:
+    # Use DataVolume for the boot source (ISO)
+    kubevirt.io/boot-source: "datavolume"
+    kubevirt.io/boot-source-type: "http"
+spec:
+  machineClass: "medium"
+  name: "talos-static-ip-vm"
+  provider: kubevirt
+
+  # Operating system configuration - Talos v1.12.2
+  os:
+    family: linux
+    distribution: talos
+    version: "1.12.2"
+    architecture: amd64
+    # Talos metal ISO image
+    imageID: "https://github.com/siderolabs/talos/releases/download/v1.12.2/metal-amd64.iso"
+
+  # Define disks - the ISO will be attached as a cdrom
+  disks:
+    - name: "root"
+      sizeGB: 50
+      boot: true
+      type: "virtio"
+      encrypted: false
+
+  # Cloud-init configuration for static IP
+  # Talos uses this for initial network setup during boot
+  cloudInit:
+    type: noCloud
+    # Talos-specific metadata
+    userData: |
+      #cloud-config
+      # Talos will use this for initial boot configuration
+      # Full machine config should be applied via talosctl
+      hostname: talos-static-ip
+    # Network configuration for static IPv4
+    networkData: |
+      version: 2
+      ethernets:
+        enp1s0:
+          dhcp4: false
+          dhcp6: false
+          addresses:
+            - 192.168.1.110/24
+          routes:
+            - to: default
+              via: 192.168.1.1
+          nameservers:
+            addresses:
+              - 8.8.8.8
+              - 8.8.4.4
+
+---
+# Alternative: Talos with nocloud datasource using kernel parameters
+# This approach uses Talos's native configuration via the metal platform
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-talos-static-ip-metal
+  annotations:
+    kubevirt.io/boot-source: "datavolume"
+    kubevirt.io/boot-source-type: "http"
+spec:
+  machineClass: "large"
+  name: "talos-static-ip-controlplane"
+  provider: kubevirt
+
+  os:
+    family: linux
+    distribution: talos
+    version: "1.12.2"
+    architecture: amd64
+    # Use the nocloud image for better cloud-init support
+    imageID: "https://github.com/siderolabs/talos/releases/download/v1.12.2/nocloud-amd64.raw.xz"
+
+  disks:
+    - name: "root"
+      sizeGB: 100
+      boot: true
+      type: "virtio"
+      encrypted: false
+
+  # Cloud-init for Talos with static networking
+  cloudInit:
+    type: noCloud
+    userData: |
+      #cloud-config
+      hostname: talos-controlplane
+    networkData: |
+      version: 2
+      ethernets:
+        eth0:
+          dhcp4: false
+          dhcp6: false
+          addresses:
+            - 192.168.1.111/24
+          routes:
+            - to: default
+              via: 192.168.1.1
+          nameservers:
+            addresses:
+              - 8.8.8.8
+              - 8.8.4.4
+            search:
+              - cluster.local
+
+---
+# Talos worker node with static IP
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-talos-worker-static-ip
+  annotations:
+    kubevirt.io/boot-source: "datavolume"
+    kubevirt.io/boot-source-type: "http"
+spec:
+  machineClass: "large"
+  name: "talos-worker-01"
+  provider: kubevirt
+
+  os:
+    family: linux
+    distribution: talos
+    version: "1.12.2"
+    architecture: amd64
+    imageID: "https://github.com/siderolabs/talos/releases/download/v1.12.2/nocloud-amd64.raw.xz"
+
+  disks:
+    - name: "root"
+      sizeGB: 100
+      boot: true
+      type: "virtio"
+    # Additional disk for container storage
+    - name: "data"
+      sizeGB: 200
+      boot: false
+      type: "virtio"
+
+  cloudInit:
+    type: noCloud
+    userData: |
+      #cloud-config
+      hostname: talos-worker-01
+    networkData: |
+      version: 2
+      ethernets:
+        eth0:
+          dhcp4: false
+          addresses:
+            - 192.168.1.121/24
+          routes:
+            - to: default
+              via: 192.168.1.1
+          nameservers:
+            addresses:
+              - 8.8.8.8
+              - 1.1.1.1

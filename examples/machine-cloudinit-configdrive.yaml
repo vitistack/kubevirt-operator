@@ -1,0 +1,62 @@
+---
+# Example: Machine with cloud-init using ConfigDrive type
+# ConfigDrive is useful for OpenStack-compatible cloud images
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-cloudinit-configdrive
+spec:
+  machineClass: "medium"
+  name: "cloudinit-configdrive-vm"
+  provider: kubevirt
+
+  os:
+    family: linux
+    distribution: centos
+    version: "9"
+    architecture: amd64
+    imageID: "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2"
+
+  disks:
+    - name: "root"
+      sizeGB: 30
+      boot: true
+      type: "virtio"
+
+  # Cloud-init configuration using ConfigDrive type
+  cloudInit:
+    type: configDrive # Use ConfigDrive instead of NoCloud
+    userData: |
+      #cloud-config
+      hostname: cloudinit-configdrive-vm
+      users:
+        - name: admin
+          sudo: ALL=(ALL) NOPASSWD:ALL
+          shell: /bin/bash
+          ssh_authorized_keys:
+            - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ... your-ssh-key
+      packages:
+        - curl
+        - vim
+        - podman
+      runcmd:
+        - systemctl enable podman
+        - echo "ConfigDrive cloud-init completed" > /var/log/cloudinit-complete.log
+    # Network data for ConfigDrive (OpenStack network config format)
+    networkData: |
+      {
+        "links": [
+          {
+            "id": "eth0",
+            "type": "vif",
+            "ethernet_mac_address": "fa:16:3e:xx:xx:xx"
+          }
+        ],
+        "networks": [
+          {
+            "id": "network0",
+            "link": "eth0",
+            "type": "ipv4_dhcp"
+          }
+        ]
+      }

@@ -154,9 +154,18 @@ func (m *VMManager) CreateVirtualMachine(
 	// Build disks and volumes from the disk specs
 	disks, volumes := m.buildDisksAndVolumes(machine, pvcNames)
 
-	// Add boot source (ISO) if specified
+	// Add boot source (ISO as CDROM) if specified - only for ISO boot, not cloud images
+	// Cloud images are handled via DataVolumeTemplates on the root disk
 	if machine.Annotations[AnnotationBootSource] == BootSourceDataVolume && machine.Spec.OS.ImageID != "" {
 		disks, volumes = m.addISOBootSource(disks, volumes, vmName)
+	}
+
+	// Add cloud-init volume if configured
+	var cloudInitErr error
+	disks, volumes, cloudInitErr = m.addCloudInitToVM(ctx, machine, disks, volumes)
+	if cloudInitErr != nil {
+		logger.Error(cloudInitErr, "Failed to build cloud-init volume")
+		return nil, cloudInitErr
 	}
 
 	// Calculate resource requirements (validates MachineClass from supervisor cluster)

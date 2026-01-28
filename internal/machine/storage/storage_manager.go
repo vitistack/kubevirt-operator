@@ -75,8 +75,15 @@ func (m *StorageManager) GetDefaultStorageClass(ctx context.Context, clusterClie
 }
 
 // CreatePVCsFromDiskSpecs creates PVCs for each disk in machine.spec.disks on the remote cluster
+// For cloud image boot sources, skip boot disk PVC creation as it will be created by DataVolumeTemplate
 func (m *StorageManager) CreatePVCsFromDiskSpecs(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string, remoteClient client.Client) ([]string, error) {
 	logger := log.FromContext(ctx)
+
+	// Check if using cloud image boot source - boot disk will be created by DataVolumeTemplate
+	isCloudImageBoot := machine.Annotations["kubevirt.io/boot-source"] == "cloudimage" && machine.Spec.OS.ImageID != ""
+	if isCloudImageBoot {
+		logger.Info("Using cloud image boot source, boot disk will be created by DataVolumeTemplate")
+	}
 
 	// Check if a storage class is explicitly configured
 	storageClass := viper.GetString(consts.STORAGE_CLASS_NAME)
@@ -93,11 +100,13 @@ func (m *StorageManager) CreatePVCsFromDiskSpecs(ctx context.Context, machine *v
 
 	pvcNames := make([]string, 0, max(1, len(machine.Spec.Disks)))
 
-	// If no disks are specified in the spec, create a default root disk
+	// If no disks are specified in the spec, create a default root disk (unless using cloud image)
 	if len(machine.Spec.Disks) == 0 {
 		pvcName := vmName
-		if err := m.createSinglePVC(ctx, machine, pvcName, "10Gi", storageClass, true, remoteClient); err != nil {
-			return nil, fmt.Errorf("failed to create default root PVC: %w", err)
+		if !isCloudImageBoot {
+			if err := m.createSinglePVC(ctx, machine, pvcName, "10Gi", storageClass, true, remoteClient); err != nil {
+				return nil, fmt.Errorf("failed to create default root PVC: %w", err)
+			}
 		}
 		pvcNames = append(pvcNames, pvcName)
 		return pvcNames, nil
@@ -117,6 +126,13 @@ func (m *StorageManager) CreatePVCsFromDiskSpecs(ctx context.Context, machine *v
 		default:
 			// Non-boot disks without names use vmName-disk{index}
 			pvcName = fmt.Sprintf("%s-disk%d", vmName, i)
+		}
+
+		// Skip boot disk PVC creation for cloud image boot (DataVolumeTemplate will create it)
+		if disk.Boot && isCloudImageBoot {
+			logger.V(1).Info("Skipping boot disk PVC creation (cloud image DataVolumeTemplate will create it)", "pvc", pvcName)
+			pvcNames = append(pvcNames, pvcName)
+			continue
 		}
 
 		// Convert sizeGB to storage size string

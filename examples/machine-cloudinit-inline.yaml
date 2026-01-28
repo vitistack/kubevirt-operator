@@ -1,0 +1,70 @@
+---
+# Example: Machine with inline cloud-init user data
+# This is the simplest approach - cloud-init data is directly in the Machine spec
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-cloudinit-inline
+  annotations:
+    # Use cloudimage boot source for qcow2/cloud images (imports to root disk)
+    # Use "datavolume" for ISO images that boot from CDROM
+    kubevirt.io/boot-source: "cloudimage"
+    kubevirt.io/boot-source-type: "http"
+spec:
+  machineClass: "medium"
+  name: "cloudinit-inline-vm"
+  provider: kubevirt
+
+  os:
+    family: linux
+    distribution: ubuntu
+    version: "24.04"
+    architecture: amd64
+    # Use a cloud image that supports cloud-init
+    imageID: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+
+  disks:
+    - name: "root"
+      sizeGB: 20
+      boot: true
+      type: "virtio"
+
+  # Cloud-init configuration with inline data
+  cloudInit:
+    type: noCloud # Default type, can also use "configDrive"
+    userData: |
+      #cloud-config
+      hostname: cloudinit-inline-vm
+      users:
+        - name: admin
+          sudo: ALL=(ALL) NOPASSWD:ALL
+          shell: /bin/bash
+          ssh_authorized_keys:
+            - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHAiYcx5et99k1dOe0lStUH7+T6cGf83L8k3fNIQomYv rogerwesterbo@MBP-J21JWW52R6
+      packages:
+        - curl
+        - vim
+        - htop
+      runcmd:
+        - echo "Cloud-init completed successfully" > /var/log/cloudinit-complete.log
+      write_files:
+        - path: /etc/motd
+          content: |
+            Welcome to your KubeVirt VM!
+            Managed by vitistack kubevirt-operator
+          permissions: '0644'
+    networkData: |
+      version: 2
+      ethernets:
+        enp1s0:
+          dhcp4: false
+          dhcp6: false
+          addresses:
+            - 100.64.2.110/24
+          routes:
+            - to: default
+              via: 100.64.2.1
+          nameservers:
+            addresses:
+              - 8.8.8.8
+              - 8.8.4.4

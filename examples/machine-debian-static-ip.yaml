@@ -1,0 +1,70 @@
+---
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-debian-static-ip
+  annotations:
+    # Annotation to indicate we want to use a DataVolume for the boot source
+    kubevirt.io/boot-source: "datavolume"
+    kubevirt.io/boot-source-type: "http"
+spec:
+  machineClass: "medium"
+  name: "debian-static-ip-vm"
+  provider: kubevirt
+
+  os:
+    family: linux
+    distribution: debian
+    version: "13.3"
+    architecture: amd64
+    # Debian 12 (Bookworm) cloud image with cloud-init support
+    imageID: "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.3.0-amd64-netinst.iso"
+
+  disks:
+    - name: "root"
+      sizeGB: 20
+      boot: true
+      type: "virtio"
+
+  # Cloud-init configuration with static IPv4
+  cloudInit:
+    type: noCloud
+    userData: |
+      #cloud-config
+      hostname: debian-static-ip
+      fqdn: debian-static-ip.example.local
+      manage_etc_hosts: true
+      users:
+        - name: admin
+          sudo: ALL=(ALL) NOPASSWD:ALL
+          shell: /bin/bash
+          lock_passwd: false
+          ssh_authorized_keys:
+            - ssh-ed25519  ...... your-ssh-key
+      packages:
+        - curl
+        - vim
+        - htop
+        - net-tools
+      package_update: true
+      package_upgrade: true
+      runcmd:
+        - echo "Static IP configuration completed at $(date)" >> /var/log/cloudinit-complete.log
+    # Network configuration v2 (netplan format) with static IPv4
+    networkData: |
+      version: 2
+      ethernets:
+        enp1s0:
+          dhcp4: false
+          dhcp6: false
+          addresses:
+            - 192.168.1.150/24
+          routes:
+            - to: default
+              via: 192.168.1.1
+          nameservers:
+            addresses:
+              - 8.8.8.8
+              - 8.8.4.4
+            search:
+              - example.local

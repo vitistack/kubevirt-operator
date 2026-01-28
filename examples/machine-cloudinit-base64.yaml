@@ -1,0 +1,46 @@
+---
+# Example: Machine with base64-encoded cloud-init data
+# Useful when cloud-init data contains special characters or is pre-encoded
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-cloudinit-base64
+spec:
+  machineClass: "small"
+  name: "cloudinit-base64-vm"
+  provider: kubevirt
+
+  os:
+    family: linux
+    distribution: debian
+    version: "12"
+    architecture: amd64
+    imageID: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
+
+  disks:
+    - name: "root"
+      sizeGB: 15
+      boot: true
+      type: "virtio"
+
+  # Cloud-init configuration with base64-encoded data
+  # The base64 value below decodes to:
+  # #cloud-config
+  # hostname: base64-vm
+  # users:
+  #   - name: admin
+  #     sudo: ALL=(ALL) NOPASSWD:ALL
+  #     shell: /bin/bash
+  cloudInit:
+    type: noCloud
+    userDataBase64: |
+      I2Nsb3VkLWNvbmZpZwpob3N0bmFtZTogYmFzZTY0LXZtCnVzZXJzOgogIC0gbmFtZTogYWRtaW4K
+      ICAgIHN1ZG86IEFMTD0oQUxMKSBOT1BBU1NXRDpBTEwKICAgIHNoZWxsOiAvYmluL2Jhc2gK
+
+# To generate base64-encoded cloud-init data:
+# echo '#cloud-config
+# hostname: base64-vm
+# users:
+#   - name: admin
+#     sudo: ALL=(ALL) NOPASSWD:ALL
+#     shell: /bin/bash' | base64

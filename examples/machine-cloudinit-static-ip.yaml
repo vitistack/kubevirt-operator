@@ -1,0 +1,235 @@
+---
+# Example: Machine with cloud-init configuring static IPv4 address
+# This example shows how to configure a static IP address using cloud-init network data
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-cloudinit-static-ip
+spec:
+  machineClass: "medium"
+  name: "static-ip-vm"
+  provider: kubevirt
+
+  os:
+    family: linux
+    distribution: ubuntu
+    version: "24.04"
+    architecture: amd64
+    imageID: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+
+  disks:
+    - name: "root"
+      sizeGB: 20
+      boot: true
+      type: "virtio"
+
+  # Cloud-init configuration with static IPv4
+  cloudInit:
+    type: noCloud
+    userData: |
+      #cloud-config
+      hostname: static-ip-vm
+      users:
+        - name: admin
+          sudo: ALL=(ALL) NOPASSWD:ALL
+          shell: /bin/bash
+          ssh_authorized_keys:
+            - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ... your-ssh-key
+      packages:
+        - curl
+        - vim
+      runcmd:
+        - echo "Static IP configuration completed" > /var/log/cloudinit-complete.log
+
+    # Network configuration v2 (netplan format) with static IPv4
+    networkData: |
+      version: 2
+      ethernets:
+        enp1s0:
+          dhcp4: false
+          dhcp6: false
+          addresses:
+            - 192.168.1.100/24
+          routes:
+            - to: default
+              via: 192.168.1.1
+          nameservers:
+            addresses:
+              - 8.8.8.8
+              - 8.8.4.4
+            search:
+              - example.local
+
+---
+# Alternative: Using network config v1 format (for older cloud-init versions)
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-cloudinit-static-ip-v1
+spec:
+  machineClass: "medium"
+  name: "static-ip-vm-v1"
+  provider: kubevirt
+
+  os:
+    family: linux
+    distribution: centos
+    version: "9"
+    architecture: amd64
+    imageID: "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2"
+
+  disks:
+    - name: "root"
+      sizeGB: 20
+      boot: true
+      type: "virtio"
+
+  cloudInit:
+    type: noCloud
+    userData: |
+      #cloud-config
+      hostname: static-ip-vm-v1
+      users:
+        - name: admin
+          sudo: ALL=(ALL) NOPASSWD:ALL
+          shell: /bin/bash
+          ssh_authorized_keys:
+            - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ... your-ssh-key
+
+    # Network configuration v1 format with static IPv4
+    networkData: |
+      version: 1
+      config:
+        - type: physical
+          name: eth0
+          mac_address: "fa:16:3e:xx:xx:xx"
+          subnets:
+            - type: static
+              address: 192.168.1.101
+              netmask: 255.255.255.0
+              gateway: 192.168.1.1
+              dns_nameservers:
+                - 8.8.8.8
+                - 8.8.4.4
+              dns_search:
+                - example.local
+
+---
+# Example with dual-stack (IPv4 + IPv6) static configuration
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-cloudinit-static-dualstack
+spec:
+  machineClass: "medium"
+  name: "dualstack-vm"
+  provider: kubevirt
+
+  os:
+    family: linux
+    distribution: ubuntu
+    version: "24.04"
+    architecture: amd64
+    imageID: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+
+  disks:
+    - name: "root"
+      sizeGB: 20
+      boot: true
+      type: "virtio"
+
+  cloudInit:
+    type: noCloud
+    userData: |
+      #cloud-config
+      hostname: dualstack-vm
+      users:
+        - name: admin
+          sudo: ALL=(ALL) NOPASSWD:ALL
+          shell: /bin/bash
+          ssh_authorized_keys:
+            - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ... your-ssh-key
+
+    # Network configuration v2 with dual-stack (IPv4 + IPv6)
+    networkData: |
+      version: 2
+      ethernets:
+        enp1s0:
+          dhcp4: false
+          dhcp6: false
+          addresses:
+            - 192.168.1.102/24
+            - 2001:db8::102/64
+          routes:
+            - to: default
+              via: 192.168.1.1
+            - to: "::/0"
+              via: "2001:db8::1"
+          nameservers:
+            addresses:
+              - 8.8.8.8
+              - 8.8.4.4
+              - 2001:4860:4860::8888
+              - 2001:4860:4860::8844
+            search:
+              - example.local
+
+---
+# Example with multiple network interfaces
+apiVersion: vitistack.io/v1alpha1
+kind: Machine
+metadata:
+  name: example-cloudinit-multi-nic
+spec:
+  machineClass: "large"
+  name: "multi-nic-vm"
+  provider: kubevirt
+
+  os:
+    family: linux
+    distribution: ubuntu
+    version: "24.04"
+    architecture: amd64
+    imageID: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+
+  disks:
+    - name: "root"
+      sizeGB: 30
+      boot: true
+      type: "virtio"
+
+  cloudInit:
+    type: noCloud
+    userData: |
+      #cloud-config
+      hostname: multi-nic-vm
+      users:
+        - name: admin
+          sudo: ALL=(ALL) NOPASSWD:ALL
+          shell: /bin/bash
+          ssh_authorized_keys:
+            - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ... your-ssh-key
+
+    # Network configuration with multiple interfaces
+    networkData: |
+      version: 2
+      ethernets:
+        # Management interface - static IP
+        enp1s0:
+          dhcp4: false
+          addresses:
+            - 192.168.1.103/24
+          routes:
+            - to: default
+              via: 192.168.1.1
+          nameservers:
+            addresses:
+              - 8.8.8.8
+        # Storage network - static IP, no gateway
+        enp2s0:
+          dhcp4: false
+          addresses:
+            - 10.0.0.103/24
+        # Application network - DHCP
+        enp3s0:
+          dhcp4: true
