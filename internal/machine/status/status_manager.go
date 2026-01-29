@@ -361,7 +361,13 @@ func findMatchingPod(podList *corev1.PodList, machineName string) *corev1.Pod {
 
 // populateIPAddressesFromInterfaces categorizes and populates IP addresses from network interfaces
 func (m *StatusManager) populateIPAddressesFromInterfaces(machine *vitistackv1alpha1.Machine, networkInterfaces []vitistackv1alpha1.NetworkInterfaceStatus) {
-	allIpAddresses := []string{}
+	// Calculate total IP addresses for preallocation
+	totalIPs := 0
+	for i := range networkInterfaces {
+		totalIPs += len(networkInterfaces[i].IPAddresses)
+	}
+
+	allIpAddresses := make([]string, 0, totalIPs)
 	ipAddressesWithNoName := []string{}
 	ipAddressesWithName := []string{}
 
