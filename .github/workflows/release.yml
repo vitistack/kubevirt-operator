@@ -16,19 +16,20 @@ env:
   HELM_REGISTRY: ghcr.io/vitistack/helm
 
 jobs:
+  # Build OCI images for multiple architectures using native runners
   build-image:
     name: Build Image (${{ matrix.platform }})
-    runs-on: ${{ matrix.runs_on }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: linux/amd64
             arch: amd64
-            runs_on: ubuntu-latest
+            runner: ubuntu-latest
           - platform: linux/arm64
             arch: arm64
-            runs_on: ubuntu-24.04-arm
+            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
