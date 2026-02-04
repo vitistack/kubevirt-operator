@@ -16,12 +16,11 @@ spec:
   os:
     family: linux
     distribution: debian
-    version: "13.2"
+    version: "13.3"
     architecture: amd64
     # HTTP URL to the debian ISO image
     # This will be used to create a DataVolume with CDI
-    imageID: "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.2.0-amd64-netinst.iso"
-
+    imageID: "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.3.0-amd64-netinst.iso"
   # Define disks - the ISO will be attached as a cdrom
   disks:
     - name: "root"
