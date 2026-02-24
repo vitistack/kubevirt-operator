@@ -161,7 +161,7 @@ func checkKubeVirtCROnCluster(ctx context.Context, remoteClient client.Client, n
 		}
 
 		for _, condition := range conditions {
-			conditionMap, ok := condition.(map[string]interface{})
+			conditionMap, ok := condition.(map[string]any)
 			if !ok {
 				continue
 			}

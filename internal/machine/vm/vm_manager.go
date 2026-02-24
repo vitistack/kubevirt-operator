@@ -28,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/utils/ptr"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -111,20 +110,20 @@ func (m *VMManager) buildVMSpec(ctx context.Context, params *vmBuildParams) *kub
 							Threads: params.threadsRequest,
 						},
 						Memory: &kubevirtv1.Memory{
-							Guest: ptr.To(resource.MustParse(params.memoryRequest)),
+							Guest: new(resource.MustParse(params.memoryRequest)),
 						},
 						Firmware: &kubevirtv1.Firmware{
 							Bootloader: &kubevirtv1.Bootloader{
 								EFI: &kubevirtv1.EFI{
 									// SecureBoot disabled for broader OS compatibility
-									SecureBoot: ptr.To(false),
+									SecureBoot: new(false),
 								},
 							},
 						},
 						Devices: kubevirtv1.Devices{
 							Disks:                      params.disks,
-							AutoattachPodInterface:     ptr.To(false),
-							NetworkInterfaceMultiQueue: ptr.To(true),
+							AutoattachPodInterface:     new(false),
+							NetworkInterfaceMultiQueue: new(true),
 							Interfaces: []kubevirtv1.Interface{
 								{
 									Name:  params.networkConfiguration.Name,

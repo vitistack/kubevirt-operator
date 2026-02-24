@@ -248,7 +248,7 @@ func extractVersionFromSpec(crd *unstructured.Unstructured, crdName string, vers
 	}
 
 	// Get the first (or latest) version
-	if versionMap, ok := specVersions[0].(map[string]interface{}); ok {
+	if versionMap, ok := specVersions[0].(map[string]any); ok {
 		if version, foundVer := versionMap["name"].(string); foundVer {
 			versions[crdName] = version
 		}

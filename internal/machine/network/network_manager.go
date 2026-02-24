@@ -38,10 +38,10 @@ type NetworkAttachmentConfig struct {
 
 // NetworkAttachmentConfigPlugin represents a plugin in the CNI configuration
 type NetworkAttachmentConfigPlugin struct {
-	Type   string                 `json:"type"`
-	Bridge string                 `json:"bridge,omitempty"`
-	IPAM   map[string]interface{} `json:"ipam,omitempty"`
-	VLAN   int                    `json:"vlan,omitempty"`
+	Type   string         `json:"type"`
+	Bridge string         `json:"bridge,omitempty"`
+	IPAM   map[string]any `json:"ipam,omitempty"`
+	VLAN   int            `json:"vlan,omitempty"`
 }
 
 func (m *NetworkManager) GetOrCreateNetworkConfiguration(ctx context.Context, machine *vitistackv1alpha1.Machine, remoteClient client.Client) (*kubevirtv1.Network, error) {

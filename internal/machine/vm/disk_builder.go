@@ -318,12 +318,10 @@ func getISOStorageSize(ctx context.Context, imageURL string, sourceType string) 
 
 	// Add 10% buffer for filesystem overhead, then round up to nearest Gi
 	sizeWithBuffer := int64(float64(contentLength) * 1.1)
-	sizeInGi := (sizeWithBuffer + bytesPerGi - 1) / bytesPerGi // Ceiling division
-
-	// Minimum 1Gi
-	if sizeInGi < 1 {
-		sizeInGi = 1
-	}
+	sizeInGi := max(
+		// Ceiling division
+		// Minimum 1Gi
+		(sizeWithBuffer+bytesPerGi-1)/bytesPerGi, 1)
 
 	sizeStr := fmt.Sprintf("%dGi", sizeInGi)
 	logger.Info("Determined ISO size from Content-Length",
