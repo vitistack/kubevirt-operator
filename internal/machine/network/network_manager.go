@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/spf13/viper"
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
@@ -16,6 +17,10 @@ import (
 	netattdefv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 )
+
+// deprecationWarned tracks namespaces for which the deprecation warning has already been logged,
+// so we don't spam the logs on every reconcile loop.
+var deprecationWarned sync.Map
 
 // EventsManager handles event monitoring and error detection
 type NetworkManager struct {
@@ -87,13 +92,31 @@ func (m *NetworkManager) GetOrCreateNetworkConfiguration(ctx context.Context, ma
 	}, nil
 }
 
-// findNetworkNamespace retrieves a NetworkNamespace for the machine
-// TODO: Once Machine/KubernetesCluster CRD has a networkNamespaceName field, use that instead
-// For now, try to get NetworkNamespace by machine name, then fall back to listing
+// findNetworkNamespace retrieves a NetworkNamespace for the machine.
+// If Machine.Spec.Network.NetworkNamespaceName is set, it looks up that specific NetworkNamespace.
+// Otherwise, it falls back to looking up by machine name, then listing all (legacy behavior with deprecation warning).
 func (m *NetworkManager) findNetworkNamespace(ctx context.Context, machine *vitistackv1alpha1.Machine) (*vitistackv1alpha1.NetworkNamespace, error) {
 	logger := log.FromContext(ctx)
 
-	// Try to get NetworkNamespace by machine name first
+	// If the machine spec has a specific NetworkNamespace name, look it up directly
+	if machine.Spec.Network.NetworkNamespaceName != "" {
+		nn := &vitistackv1alpha1.NetworkNamespace{}
+		if err := m.Get(ctx, client.ObjectKey{Name: machine.Spec.Network.NetworkNamespaceName, Namespace: machine.Namespace}, nn); err != nil {
+			return nil, fmt.Errorf("failed to get specified NetworkNamespace %q in namespace %q: %w",
+				machine.Spec.Network.NetworkNamespaceName, machine.Namespace, err)
+		}
+		return nn, nil
+	}
+
+	// Fallback: legacy behavior — try by machine name first, then list
+	if _, alreadyWarned := deprecationWarned.LoadOrStore(machine.Namespace, true); !alreadyWarned {
+		logger.Info("WARNING: networkNamespaceName not set on Machine spec, falling back to legacy NetworkNamespace lookup. "+
+			"Please set spec.network.networkNamespaceName on the Machine resource or spec.data.networkNamespaceName on the KubernetesCluster.",
+			"namespace", machine.Namespace,
+			"machine", machine.Name)
+	}
+
+	// Try to get NetworkNamespace by machine name
 	networkNamespace := &vitistackv1alpha1.NetworkNamespace{}
 	err := m.Get(ctx, client.ObjectKey{
 		Name:      machine.Name,
@@ -109,7 +132,7 @@ func (m *NetworkManager) findNetworkNamespace(ctx context.Context, machine *viti
 	}
 
 	// NetworkNamespace not found by name, try to list and get the first one
-	logger.Info("NetworkNamespace not found by name, searching for first available NetworkNamespace in namespace",
+	logger.Info("NetworkNamespace not found by machine name, searching for first available NetworkNamespace in namespace",
 		"namespace", machine.Namespace)
 
 	networkNamespaceList := &vitistackv1alpha1.NetworkNamespaceList{}

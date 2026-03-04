@@ -101,8 +101,9 @@ func (m *VMManager) persistMacAddressesToNetworkConfiguration(ctx context.Contex
 				},
 			},
 			Spec: vitistackv1alpha1.NetworkConfigurationSpec{
-				Name:        shortName,
-				Description: "Network configuration for machine " + machine.Name,
+				NetworkNamespaceName: machine.Spec.Network.NetworkNamespaceName,
+				Name:                 shortName,
+				Description:          "Network configuration for machine " + machine.Name,
 				NetworkInterfaces: []vitistackv1alpha1.NetworkConfigurationInterface{
 					networkInterface,
 				},
