@@ -19,6 +19,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/spf13/viper"
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
@@ -30,6 +31,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -72,6 +74,63 @@ func (m *StorageManager) GetDefaultStorageClass(ctx context.Context, clusterClie
 
 	// No default storage class found
 	return "", fmt.Errorf("no default storage class found in the cluster")
+}
+
+// GetAccessModeForStorageClass queries the CDI StorageProfile on the remote kubevirt cluster
+// to determine the correct PVC access mode for the given storage class and volume mode.
+// This ensures the access mode matches what the kubevirt cluster's storage actually supports.
+func (m *StorageManager) GetAccessModeForStorageClass(ctx context.Context, storageClassName string, volumeMode corev1.PersistentVolumeMode, remoteClient client.Client) corev1.PersistentVolumeAccessMode {
+	logger := log.FromContext(ctx)
+
+	// Query the CDI StorageProfile from the remote kubevirt cluster.
+	// CDI creates one StorageProfile per StorageClass with the same name.
+	storageProfile := &cdiv1.StorageProfile{}
+	if err := remoteClient.Get(ctx, types.NamespacedName{Name: storageClassName}, storageProfile); err != nil {
+		logger.V(1).Info("Failed to get StorageProfile from remote cluster, using fallback access mode",
+			"storageClass", storageClassName, "error", err.Error())
+		return getFallbackAccessMode()
+	}
+
+	// First, look for a ClaimPropertySet that matches the desired volume mode
+	for _, propSet := range storageProfile.Status.ClaimPropertySets {
+		if propSet.VolumeMode != nil && *propSet.VolumeMode == volumeMode && len(propSet.AccessModes) > 0 {
+			accessMode := preferredAccessMode(propSet.AccessModes)
+			logger.Info("Resolved access mode from StorageProfile",
+				"storageClass", storageClassName, "volumeMode", volumeMode, "accessMode", accessMode)
+			return accessMode
+		}
+	}
+
+	// No matching volume mode — use the first available property set
+	if len(storageProfile.Status.ClaimPropertySets) > 0 && len(storageProfile.Status.ClaimPropertySets[0].AccessModes) > 0 {
+		accessMode := preferredAccessMode(storageProfile.Status.ClaimPropertySets[0].AccessModes)
+		logger.Info("Resolved access mode from StorageProfile (no volume mode match)",
+			"storageClass", storageClassName, "accessMode", accessMode)
+		return accessMode
+	}
+
+	logger.V(1).Info("No access modes found in StorageProfile, using fallback",
+		"storageClass", storageClassName)
+	return getFallbackAccessMode()
+}
+
+// preferredAccessMode selects the best access mode from a list,
+// preferring ReadWriteMany to enable live migration between nodes.
+func preferredAccessMode(modes []corev1.PersistentVolumeAccessMode) corev1.PersistentVolumeAccessMode {
+	if slices.Contains(modes, corev1.ReadWriteMany) {
+		return corev1.ReadWriteMany
+	}
+	return modes[0]
+}
+
+// getFallbackAccessMode returns the access mode from the PVC_ACCESS_MODE config,
+// defaulting to ReadWriteMany if not configured.
+func getFallbackAccessMode() corev1.PersistentVolumeAccessMode {
+	accessMode := corev1.PersistentVolumeAccessMode(viper.GetString(consts.PVC_ACCESS_MODE))
+	if accessMode == "" {
+		return corev1.ReadWriteMany
+	}
+	return accessMode
 }
 
 // CreatePVCsFromDiskSpecs creates PVCs for each disk in machine.spec.disks on the remote cluster
@@ -173,6 +232,9 @@ func (m *StorageManager) createSinglePVC(ctx context.Context, machine *vitistack
 		logger.V(1).Info("Using default VolumeMode", "volumeMode", volumeMode)
 	}
 
+	// Query the kubevirt cluster's CDI StorageProfile for the correct access mode
+	accessMode := m.GetAccessModeForStorageClass(ctx, storageClass, volumeMode, remoteClient)
+
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pvcName,
@@ -181,7 +243,7 @@ func (m *StorageManager) createSinglePVC(ctx context.Context, machine *vitistack
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{
-				corev1.ReadWriteOnce,
+				accessMode,
 			},
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{

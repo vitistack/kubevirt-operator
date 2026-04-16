@@ -16,7 +16,7 @@ const (
 	VM_NAME_PREFIX                            = "VM_NAME_PREFIX"
 	PVC_VOLUME_MODE                           = "PVC_VOLUME_MODE"
 	// PVC_ACCESS_MODE controls the access mode for PVCs and DataVolumes
-	// Valid values: "ReadWriteOnce" (default), "ReadWriteMany", "ReadOnlyMany"
+	// Valid values: "ReadWriteMany" (default), "ReadWriteOnce", "ReadOnlyMany"
 	PVC_ACCESS_MODE = "PVC_ACCESS_MODE"
 	// STORAGE_CLASS_NAME allows specifying a storage class to use for PVCs
 	// If empty (default), the cluster's default storage class will be used
