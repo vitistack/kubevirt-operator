@@ -25,6 +25,7 @@ package v1alpha1
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"time"
 
@@ -311,6 +312,16 @@ func (r *MachineReconciler) ensureVirtualMachine(ctx context.Context, machine *v
 		}
 		newVM, vmErr := r.VMManager.CreateVirtualMachine(ctx, machine, vmName, pvcNames)
 		if vmErr != nil {
+			// Transient prerequisites (static IP not yet allocated, cloud-init
+			// source Secret/ConfigMap missing) are expected on the first few
+			// reconciles — don't flip the Machine to Failed for these. Also
+			// handle resourceVersion conflicts on NetworkConfiguration: static-ip-
+			// operator writes .status concurrently, and a losing write-race is a
+			// retriable condition, not a real failure.
+			if stderrors.Is(vmErr, vm.ErrWaitingForStaticIP) || stderrors.Is(vmErr, vm.ErrWaitingForCloudInitSource) || errors.IsConflict(vmErr) {
+				logger.Info("Waiting for cloud-init prerequisites", "machine", machine.Name, "reason", vmErr.Error())
+				return nil, vmName, ctrl.Result{RequeueAfter: RequeueDelay}, true, nil
+			}
 			logger.Error(vmErr, "Failed to create VirtualMachine in remote cluster")
 			_ = r.StatusManager.UpdateMachineStatus(ctx, machine, "Failed")
 			return nil, vmName, ctrl.Result{RequeueAfter: RequeueDelay}, true, vmErr
@@ -675,12 +686,13 @@ func NewMachineReconciler(c client.Client, scheme *runtime.Scheme, kubevirtClien
 	eventsManager := events.NewManager(c)
 	macGenerator := macaddress.NewVitistackMacGenerator()
 	statusManager := status.NewManager(c, eventsManager)
+	storageManager := storage.NewManager(c, scheme)
 
 	return &MachineReconciler{
 		Client:            c,
 		Scheme:            scheme,
-		StorageManager:    storage.NewManager(c, scheme),
-		VMManager:         vm.NewManager(c, scheme, macGenerator, statusManager),
+		StorageManager:    storageManager,
+		VMManager:         vm.NewManager(c, scheme, macGenerator, statusManager, storageManager),
 		StatusManager:     statusManager,
 		EventsManager:     eventsManager,
 		NetworkManager:    network.NewManager(c),

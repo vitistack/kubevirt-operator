@@ -62,34 +62,57 @@ func (m *NetworkManager) GetOrCreateNetworkConfiguration(ctx context.Context, ma
 		return nil, err
 	}
 
-	// If no NetworkNamespace found or vlanId not set, use default pod network
-	if networkNamespace == nil || networkNamespace.Status.VlanID == 0 {
+	if networkNamespace == nil {
 		logger.Info("Using default pod network",
 			"namespace", machine.Namespace,
-			"reason", "no NetworkNamespace or vlanId not set")
+			"reason", "no NetworkNamespace")
 		return defaultPodNetwork(), nil
 	}
 
 	vlanId := networkNamespace.Status.VlanID
-	nadName := fmt.Sprintf("vlan%d", vlanId)
+	isStatic := networkNamespace.Spec.IPAllocation != nil &&
+		networkNamespace.Spec.IPAllocation.Type == vitistackv1alpha1.IPAllocationTypeStatic
 
-	logger.Info("Found NetworkNamespace with vlanId",
+	// Attach through a bridge NAD when either:
+	//   - a VLAN id is known (tagged bridge — existing behavior for both DHCP and static), or
+	//   - the NetworkNamespace uses static allocation (untagged bridge — required so cidata's
+	//     static IP lands on a real L2 segment instead of KubeVirt's pod network, which runs
+	//     its own DHCP and would override the cidata-assigned address).
+	// DHCP NetworkNamespaces without a VLAN continue to use pod network (unchanged).
+	if vlanId == 0 && !isStatic {
+		logger.Info("Using default pod network",
+			"namespace", machine.Namespace,
+			"reason", "DHCP NetworkNamespace without vlanId")
+		return defaultPodNetwork(), nil
+	}
+
+	nadName := nadNameFor(vlanId)
+
+	logger.Info("Using bridge NAD",
 		"namespace", machine.Namespace,
 		"vlanId", vlanId,
+		"isStatic", isStatic,
 		"nadName", nadName)
 
-	// Ensure NetworkAttachmentDefinition exists on remote cluster
 	if err := m.ensureNetworkAttachmentDefinition(ctx, nadName, machine.Namespace, vlanId, remoteClient); err != nil {
 		return nil, err
 	}
 
-	// Return the network configuration
 	return &kubevirtv1.Network{
 		Name: nadName,
 		NetworkSource: kubevirtv1.NetworkSource{
 			Multus: &kubevirtv1.MultusNetwork{NetworkName: nadName},
 		},
 	}, nil
+}
+
+// nadNameFor returns the NAD name for a given VLAN id. Untagged bridges (vlanId == 0)
+// use a fixed name so multiple untagged static NetworkNamespaces reuse the same NAD.
+func nadNameFor(vlanId int) string {
+	if vlanId > 0 {
+		return fmt.Sprintf("vlan%d", vlanId)
+	}
+	return "bridge-br0"
 }
 
 // findNetworkNamespace retrieves a NetworkNamespace for the machine.
@@ -206,7 +229,11 @@ func (m *NetworkManager) createNetworkAttachmentDefinition(ctx context.Context, 
 		cniVersion = "1.0.0" // fallback if not set
 	}
 
-	// Create the CNI configuration
+	// Create the CNI configuration. Only the bridge plugin is chained — the
+	// tuning plugin was previously included but is not shipped with Talos
+	// (and we passed no config to it), so it was a required-but-no-op link
+	// that broke the chain on nodes without it. Bridge alone is sufficient
+	// for both untagged (vlanId == 0) and VLAN-tagged NADs.
 	config := NetworkAttachmentConfig{
 		CNIVersion: cniVersion,
 		Name:       "br0",
@@ -217,9 +244,6 @@ func (m *NetworkManager) createNetworkAttachmentDefinition(ctx context.Context, 
 				IPAM:   map[string]any{},
 				VLAN:   vlanId,
 			},
-			{
-				Type: "tuning",
-			},
 		},
 	}
 
@@ -229,15 +253,18 @@ func (m *NetworkManager) createNetworkAttachmentDefinition(ctx context.Context, 
 		return nil, fmt.Errorf("failed to marshal NAD config: %w", err)
 	}
 
-	// Create the NetworkAttachmentDefinition with labels for tracking
+	labels := map[string]string{
+		vitistackv1alpha1.ManagedByAnnotation: viper.GetString(consts.MANAGED_BY),
+	}
+	if vlanId > 0 {
+		labels["vitistack.io/vlan-id"] = fmt.Sprintf("%d", vlanId)
+	}
+
 	nad := &netattdefv1.NetworkAttachmentDefinition{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
-			Labels: map[string]string{
-				vitistackv1alpha1.ManagedByAnnotation: viper.GetString(consts.MANAGED_BY),
-				"vitistack.io/vlan-id":                fmt.Sprintf("%d", vlanId),
-			},
+			Labels:    labels,
 		},
 		Spec: netattdefv1.NetworkAttachmentDefinitionSpec{
 			Config: string(configJSON),

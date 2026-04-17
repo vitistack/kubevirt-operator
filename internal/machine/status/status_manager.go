@@ -459,28 +459,40 @@ func extractDiskVolumesFromVMI(vmi *kubevirtv1.VirtualMachineInstance) ([]vitist
 	var diskVolumes []vitistackv1alpha1.MachineStatusDisk
 	for i := range vmi.Status.VolumeStatus {
 		volume := &vmi.Status.VolumeStatus[i]
-		if volume.Name != "" {
-
-			diskSize, ok := volume.PersistentVolumeClaimInfo.Capacity.Storage().AsInt64()
-			if !ok {
-				return nil, fmt.Errorf("failed to get disk size for volume %s", volume.Name)
-			}
-
-			accessModes := []string{}
-			for j := range volume.PersistentVolumeClaimInfo.AccessModes {
-				mode := volume.PersistentVolumeClaimInfo.AccessModes[j]
-				accessModes = append(accessModes, string(mode))
-			}
-
-			diskVolumes = append(diskVolumes, vitistackv1alpha1.MachineStatusDisk{
-				Name:        volume.Name,
-				Device:      fmt.Sprintf("/dev/%s", volume.Target),
-				PVCName:     volume.PersistentVolumeClaimInfo.ClaimName,
-				VolumeMode:  string(*volume.PersistentVolumeClaimInfo.VolumeMode),
-				Size:        diskSize,
-				AccessModes: accessModes,
-			})
+		if volume.Name == "" {
+			continue
 		}
+		// VolumeStatus.PersistentVolumeClaimInfo is nil for non-PVC volumes
+		// (e.g. cloudInitNoCloud, configMap, emptyDisk). MachineStatusDisk only
+		// describes PVC-backed disks, so skip the rest.
+		pvcInfo := volume.PersistentVolumeClaimInfo
+		if pvcInfo == nil {
+			continue
+		}
+
+		diskSize, ok := pvcInfo.Capacity.Storage().AsInt64()
+		if !ok {
+			return nil, fmt.Errorf("failed to get disk size for volume %s", volume.Name)
+		}
+
+		accessModes := make([]string, 0, len(pvcInfo.AccessModes))
+		for _, mode := range pvcInfo.AccessModes {
+			accessModes = append(accessModes, string(mode))
+		}
+
+		volumeMode := ""
+		if pvcInfo.VolumeMode != nil {
+			volumeMode = string(*pvcInfo.VolumeMode)
+		}
+
+		diskVolumes = append(diskVolumes, vitistackv1alpha1.MachineStatusDisk{
+			Name:        volume.Name,
+			Device:      fmt.Sprintf("/dev/%s", volume.Target),
+			PVCName:     pvcInfo.ClaimName,
+			VolumeMode:  volumeMode,
+			Size:        diskSize,
+			AccessModes: accessModes,
+		})
 	}
 	return diskVolumes, nil
 }

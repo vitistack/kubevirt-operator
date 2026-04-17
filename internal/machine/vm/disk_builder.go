@@ -204,9 +204,29 @@ func (m *VMManager) buildDataVolumeTemplates(ctx context.Context, machine *vitis
 	// Get storage class from config (empty means use cluster default)
 	storageClassName := viper.GetString(consts.STORAGE_CLASS_NAME)
 
-	// AccessModes is intentionally omitted — CDI will resolve the correct access mode
-	// from the StorageProfile on the kubevirt cluster, ensuring it matches what the
-	// storage provisioner actually supports.
+	// Resolve the access mode the same way the root PVC does: prefer what
+	// CDI's StorageProfile reports for this StorageClass, fall back to the
+	// PVC_ACCESS_MODE config. Leaving AccessModes empty causes CDI to fail
+	// with ErrClaimNotValid on StorageClasses (e.g. local-path) whose
+	// StorageProfile has no accessMode populated.
+	var accessModes []corev1.PersistentVolumeAccessMode
+	if m.StorageManager != nil {
+		resolveSC := storageClassName
+		if resolveSC == "" {
+			if def, defErr := m.StorageManager.GetDefaultStorageClass(ctx, m.remoteClient); defErr == nil {
+				resolveSC = def
+			} else {
+				logger.V(1).Info("Could not resolve default StorageClass for ISO DataVolume access mode",
+					"error", defErr.Error())
+			}
+		}
+		if resolveSC != "" {
+			accessModes = []corev1.PersistentVolumeAccessMode{
+				m.StorageManager.GetAccessModeForStorageClass(ctx, resolveSC, filesystemMode, m.remoteClient),
+			}
+		}
+	}
+
 	template := kubevirtv1.DataVolumeTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: vmName + "-iso",
@@ -222,7 +242,8 @@ func (m *VMManager) buildDataVolumeTemplates(ctx context.Context, machine *vitis
 						corev1.ResourceStorage: storageSize,
 					},
 				},
-				VolumeMode: &filesystemMode,
+				VolumeMode:  &filesystemMode,
+				AccessModes: accessModes,
 			},
 		},
 	}

@@ -124,30 +124,57 @@ func (m *VMManager) persistMacAddressesToNetworkConfiguration(ctx context.Contex
 		return nil
 	}
 
-	// NetworkConfiguration exists, update it
-	// Check if interface with this network name already exists
+	// NetworkConfiguration exists — update only if the interface or its MAC changed.
+	// static-ip-operator writes .status on the same object, so a no-op Update
+	// here would race and lose (resourceVersion conflict).
+	changed := false
 	interfaceExists := false
 	for i := range existingNetConfig.Spec.NetworkInterfaces {
 		iface := &existingNetConfig.Spec.NetworkInterfaces[i]
 		if iface.Name == networkName {
-			iface.MacAddress = macAddress
 			interfaceExists = true
+			if iface.MacAddress != macAddress {
+				iface.MacAddress = macAddress
+				changed = true
+			}
 			break
 		}
 	}
-
-	// If interface doesn't exist, append it
 	if !interfaceExists {
 		existingNetConfig.Spec.NetworkInterfaces = append(existingNetConfig.Spec.NetworkInterfaces, networkInterface)
+		changed = true
 	}
 
-	// Update in supervisor cluster
+	if !changed {
+		return nil
+	}
+
 	if err := m.supervisorClient.Update(ctx, existingNetConfig); err != nil {
 		return fmt.Errorf("failed to update NetworkConfiguration: %w", err)
 	}
 
 	logger.Info("Updated NetworkConfiguration", "name", existingNetConfig.Name, "macAddress", macAddress)
 	return nil
+}
+
+// resolveOrGenerateMAC returns the MAC already persisted on the Machine's
+// NetworkConfiguration for this interface, generating a new one only when
+// none exists. This keeps the MAC stable across reconciles so static-ip-operator
+// allocates against a single MAC and the downstream VM spec matches what
+// NetworkConfiguration.spec declares.
+func (m *VMManager) resolveOrGenerateMAC(ctx context.Context, machine *vitistackv1alpha1.Machine, networkName string) (string, error) {
+	existing := &vitistackv1alpha1.NetworkConfiguration{}
+	err := m.supervisorClient.Get(ctx, client.ObjectKey{Name: machine.Name, Namespace: machine.Namespace}, existing)
+	if err == nil {
+		for _, iface := range existing.Spec.NetworkInterfaces {
+			if iface.Name == networkName && iface.MacAddress != "" {
+				return iface.MacAddress, nil
+			}
+		}
+	} else if client.IgnoreNotFound(err) != nil {
+		return "", fmt.Errorf("get NetworkConfiguration to reuse MAC: %w", err)
+	}
+	return m.MacGenerator.GetMACAddress()
 }
 
 // CleanupNetworkConfiguration deletes the NetworkConfiguration associated with the machine
