@@ -31,6 +31,14 @@ const (
 
 	defaultUserDataSecretKey    = "userdata"
 	defaultNetworkDataSecretKey = "networkdata"
+
+	// noopUserData is a minimal valid cloud-init payload used when no
+	// user-data source is configured (Option A: Talos stays in maintenance
+	// mode and is configured later via talosctl apply-config). Without this,
+	// KubeVirt omits the user-data field entirely (omitempty), cidata ends
+	// up with an empty/missing user-data file, and Talos logs a noisy
+	// "config not found" error on every reconcile.
+	noopUserData = "#cloud-config\n"
 )
 
 // ErrWaitingForStaticIP signals the Machine references a static NetworkNamespace
@@ -89,7 +97,7 @@ func (m *VMManager) resolveUserData(ctx context.Context, machine *vitistackv1alp
 	case ci.UserDataConfigMapRef != nil:
 		return m.readConfigMapKey(ctx, machine.Namespace, ci.UserDataConfigMapRef.Name, ci.UserDataConfigMapRef.Key, defaultUserDataSecretKey)
 	}
-	return "", nil
+	return noopUserData, nil
 }
 
 func (m *VMManager) resolveNetworkData(ctx context.Context, machine *vitistackv1alpha1.Machine) (string, error) {
