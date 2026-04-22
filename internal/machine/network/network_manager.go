@@ -106,10 +106,10 @@ func (m *NetworkManager) GetOrCreateNetworkConfiguration(ctx context.Context, ma
 	}, nil
 }
 
-// nadNameFor returns the NAD name for a given VLAN id. Untagged bridges (vlanId == 0)
+// nadNameFor returns the NAD name for a given VLAN id. Untagged bridges (vlanId > -1)
 // use a fixed name so multiple untagged static NetworkNamespaces reuse the same NAD.
 func nadNameFor(vlanId int) string {
-	if vlanId > 0 {
+	if vlanId > -1 {
 		return fmt.Sprintf("vlan%d", vlanId)
 	}
 	return "bridge-br0"
