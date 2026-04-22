@@ -168,7 +168,8 @@ func renderNetworkConfigV1(netNs *vitistackv1alpha1.NetworkNamespace, nc *vitist
 	}
 
 	statusIPsByMac := map[string][]string{}
-	for _, iface := range nc.Status.NetworkInterfaces {
+	for i := range nc.Status.NetworkInterfaces {
+		iface := &nc.Status.NetworkInterfaces[i]
 		if iface.MacAddress == "" {
 			continue
 		}
@@ -181,7 +182,8 @@ func renderNetworkConfigV1(netNs *vitistackv1alpha1.NetworkNamespace, nc *vitist
 
 	var b strings.Builder
 	b.WriteString("version: 1\nconfig:\n")
-	for i, spec := range nc.Spec.NetworkInterfaces {
+	for i := range nc.Spec.NetworkInterfaces {
+		spec := &nc.Spec.NetworkInterfaces[i]
 		ips := statusIPsByMac[strings.ToLower(spec.MacAddress)]
 		if len(ips) == 0 {
 			return "", ErrWaitingForStaticIP

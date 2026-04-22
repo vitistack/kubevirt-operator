@@ -166,7 +166,8 @@ func (m *VMManager) resolveOrGenerateMAC(ctx context.Context, machine *vitistack
 	existing := &vitistackv1alpha1.NetworkConfiguration{}
 	err := m.supervisorClient.Get(ctx, client.ObjectKey{Name: machine.Name, Namespace: machine.Namespace}, existing)
 	if err == nil {
-		for _, iface := range existing.Spec.NetworkInterfaces {
+		for i := range existing.Spec.NetworkInterfaces {
+			iface := &existing.Spec.NetworkInterfaces[i]
 			if iface.Name == networkName && iface.MacAddress != "" {
 				return iface.MacAddress, nil
 			}

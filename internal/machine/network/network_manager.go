@@ -256,7 +256,7 @@ func (m *NetworkManager) createNetworkAttachmentDefinition(ctx context.Context, 
 	labels := map[string]string{
 		vitistackv1alpha1.ManagedByAnnotation: viper.GetString(consts.MANAGED_BY),
 	}
-	if vlanId > 0 {
+	if vlanId > -1 {
 		labels["vitistack.io/vlan-id"] = fmt.Sprintf("%d", vlanId)
 	}
 
