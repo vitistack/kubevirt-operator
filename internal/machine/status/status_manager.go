@@ -134,53 +134,52 @@ func (m *StatusManager) UpdateMachineStatusFromVMAndVMI(ctx context.Context, mac
 // evaluateState determines the machine state/phase and performs ancillary updates (pod info & error checks)
 func (m *StatusManager) evaluateState(machine *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine, vmi *kubevirtv1.VirtualMachineInstance, vmiExists bool, ctx context.Context, remoteClient client.Client) (state, phase string, requeue bool) {
 	logger := log.FromContext(ctx)
-	if vmiExists {
-		state, phase, requeue = m.mapVMIPhase(vmi.Status.Phase)
-		if vmi.Status.Phase == kubevirtv1.Running {
-			if err := m.updateStatusFromPodVMVMIStatus(ctx, machine, vmi, remoteClient); err != nil {
-				logger.Error(err, "Failed to update vm and vmi status information", "vmi", vmi.Name)
-			}
+
+	// Use VM's PrintableStatus directly as the machine state
+	state = string(vm.Status.PrintableStatus)
+
+	// When the VMI is Running, use the VMI state and extract runtime details (IPs, disks, etc.)
+	if vmiExists && vmi.Status.Phase == kubevirtv1.Running {
+		if err := m.updateStatusFromPodVMVMIStatus(ctx, machine, vmi, remoteClient); err != nil {
+			logger.Error(err, "Failed to update vm and vmi status information", "vmi", vmi.Name)
 		}
+		return consts.MachineStateRunning, consts.MachinePhaseRunning, false
+	}
+
+	// Derive phase and requeue from PrintableStatus
+	phase, requeue = m.phaseFromPrintableStatus(vm.Status.PrintableStatus)
+
+	// Check for errors from events
+	if vmiExists {
 		if err := m.checkVMIErrorsAndUpdateStatus(ctx, machine, vmi, remoteClient); err != nil {
 			logger.Error(err, "Failed to check VMI errors")
 		}
-		return
-	}
-	// VM path (no VMI yet)
-	state, phase, requeue = m.mapVMStatus(vm)
-	if err := m.checkVMErrorsAndUpdateStatus(ctx, machine, vm, remoteClient); err != nil {
-		logger.Error(err, "Failed to check VM errors")
+	} else {
+		if err := m.checkVMErrorsAndUpdateStatus(ctx, machine, vm, remoteClient); err != nil {
+			logger.Error(err, "Failed to check VM errors")
+		}
 	}
 	return
 }
 
-func (m *StatusManager) mapVMIPhase(phase kubevirtv1.VirtualMachineInstancePhase) (state, mappedPhase string, requeue bool) {
-	switch phase {
-	case kubevirtv1.Running:
-		return consts.MachineStateRunning, consts.MachinePhaseRunning, false
-	case kubevirtv1.Pending:
-		return consts.MachineStatePending, consts.MachinePhasePending, true
-	case kubevirtv1.Scheduling:
-		return consts.MachineStateScheduling, consts.MachinePhaseScheduling, true
-	case kubevirtv1.Scheduled:
-		return consts.MachineStateScheduled, consts.MachinePhaseScheduled, true
-	case kubevirtv1.Succeeded:
-		return consts.MachineStateSucceeded, consts.MachinePhaseSucceeded, false
-	case kubevirtv1.Failed:
-		return consts.MachineStateFailed, consts.MachinePhaseFailed, false
+// phaseFromPrintableStatus maps the VM's PrintableStatus to a machine phase and requeue decision
+func (m *StatusManager) phaseFromPrintableStatus(status kubevirtv1.VirtualMachinePrintableStatus) (phase string, requeue bool) {
+	switch status {
+	case kubevirtv1.VirtualMachineStatusRunning:
+		return consts.MachinePhaseRunning, false
+	case kubevirtv1.VirtualMachineStatusStopped,
+		kubevirtv1.VirtualMachineStatusStopping,
+		kubevirtv1.VirtualMachineStatusTerminating:
+		return consts.MachinePhaseSucceeded, false
+	case kubevirtv1.VirtualMachineStatusCrashLoopBackOff,
+		kubevirtv1.VirtualMachineStatusErrImagePull,
+		kubevirtv1.VirtualMachineStatusImagePullBackOff,
+		kubevirtv1.VirtualMachineStatusPvcNotFound,
+		kubevirtv1.VirtualMachineStatusDataVolumeError:
+		return consts.MachinePhaseFailed, true
 	default:
-		return consts.MachineStateUnknown, consts.MachinePhaseUnknown, true
+		return consts.MachinePhasePending, true
 	}
-}
-
-func (m *StatusManager) mapVMStatus(vm *kubevirtv1.VirtualMachine) (state, phase string, requeue bool) {
-	if vm.Status.Ready {
-		return consts.MachineStateRunning, consts.MachinePhaseRunning, false
-	}
-	if vm.Status.Created {
-		return consts.MachineStatePending, consts.MachinePhasePending, true
-	}
-	return consts.MachineStatePending, consts.MachinePhasePending, true
 }
 
 // checkVMIErrorsAndUpdateStatus checks for VMI errors and updates machine status accordingly
@@ -459,28 +458,40 @@ func extractDiskVolumesFromVMI(vmi *kubevirtv1.VirtualMachineInstance) ([]vitist
 	var diskVolumes []vitistackv1alpha1.MachineStatusDisk
 	for i := range vmi.Status.VolumeStatus {
 		volume := &vmi.Status.VolumeStatus[i]
-		if volume.Name != "" {
-
-			diskSize, ok := volume.PersistentVolumeClaimInfo.Capacity.Storage().AsInt64()
-			if !ok {
-				return nil, fmt.Errorf("failed to get disk size for volume %s", volume.Name)
-			}
-
-			accessModes := []string{}
-			for j := range volume.PersistentVolumeClaimInfo.AccessModes {
-				mode := volume.PersistentVolumeClaimInfo.AccessModes[j]
-				accessModes = append(accessModes, string(mode))
-			}
-
-			diskVolumes = append(diskVolumes, vitistackv1alpha1.MachineStatusDisk{
-				Name:        volume.Name,
-				Device:      fmt.Sprintf("/dev/%s", volume.Target),
-				PVCName:     volume.PersistentVolumeClaimInfo.ClaimName,
-				VolumeMode:  string(*volume.PersistentVolumeClaimInfo.VolumeMode),
-				Size:        diskSize,
-				AccessModes: accessModes,
-			})
+		if volume.Name == "" {
+			continue
 		}
+		// VolumeStatus.PersistentVolumeClaimInfo is nil for non-PVC volumes
+		// (e.g. cloudInitNoCloud, configMap, emptyDisk). MachineStatusDisk only
+		// describes PVC-backed disks, so skip the rest.
+		pvcInfo := volume.PersistentVolumeClaimInfo
+		if pvcInfo == nil {
+			continue
+		}
+
+		diskSize, ok := pvcInfo.Capacity.Storage().AsInt64()
+		if !ok {
+			return nil, fmt.Errorf("failed to get disk size for volume %s", volume.Name)
+		}
+
+		accessModes := make([]string, 0, len(pvcInfo.AccessModes))
+		for _, mode := range pvcInfo.AccessModes {
+			accessModes = append(accessModes, string(mode))
+		}
+
+		volumeMode := ""
+		if pvcInfo.VolumeMode != nil {
+			volumeMode = string(*pvcInfo.VolumeMode)
+		}
+
+		diskVolumes = append(diskVolumes, vitistackv1alpha1.MachineStatusDisk{
+			Name:        volume.Name,
+			Device:      fmt.Sprintf("/dev/%s", volume.Target),
+			PVCName:     pvcInfo.ClaimName,
+			VolumeMode:  volumeMode,
+			Size:        diskSize,
+			AccessModes: accessModes,
+		})
 	}
 	return diskVolumes, nil
 }

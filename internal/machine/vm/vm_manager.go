@@ -24,6 +24,7 @@ import (
 	"github.com/vitistack/kubevirt-operator/internal/consts"
 	"github.com/vitistack/kubevirt-operator/internal/machine/network"
 	"github.com/vitistack/kubevirt-operator/internal/machine/status"
+	"github.com/vitistack/kubevirt-operator/internal/machine/storage"
 	"github.com/vitistack/kubevirt-operator/pkg/macaddress"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,17 +42,19 @@ type VMManager struct {
 	NetworkManager   *network.NetworkManager
 	MacGenerator     macaddress.MacAddressGenerator
 	StatusManager    *status.StatusManager
+	StorageManager   *storage.StorageManager
 }
 
 // NewManager creates a new VM manager
 // The client parameter is the supervisor cluster client
-func NewManager(c client.Client, scheme *runtime.Scheme, macGenerator macaddress.MacAddressGenerator, statusManager *status.StatusManager) *VMManager {
+func NewManager(c client.Client, scheme *runtime.Scheme, macGenerator macaddress.MacAddressGenerator, statusManager *status.StatusManager, storageManager *storage.StorageManager) *VMManager {
 	return &VMManager{
 		supervisorClient: c,
 		remoteClient:     c, // Default to supervisor client for backward compatibility
 		Scheme:           scheme,
 		MacGenerator:     macGenerator,
 		StatusManager:    statusManager,
+		StorageManager:   storageManager,
 		NetworkManager:   network.NewManager(c), // Initialize NetworkManager with supervisor client
 	}
 }
@@ -179,7 +182,7 @@ func (m *VMManager) CreateVirtualMachine(
 		networkBootOrder = &bootOrder
 	}
 
-	macAddress, err := m.MacGenerator.GetMACAddress()
+	macAddress, err := m.resolveOrGenerateMAC(ctx, machine, networkConfiguration.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -187,6 +190,18 @@ func (m *VMManager) CreateVirtualMachine(
 	if err := m.persistMacAddressesToNetworkConfiguration(ctx, machine, macAddress, networkConfiguration.Name); err != nil {
 		logger.Error(err, "Failed to persist MAC address to NetworkConfiguration")
 		return nil, err
+	}
+
+	// Resolve cloud-init (cidata) after the MAC is persisted — the rendered
+	// network-config depends on static-ip-operator having allocated an IP for
+	// that MAC. If it hasn't yet, resolveCloudInit returns ErrWaitingForStaticIP
+	// and the reconciler requeues.
+	ciBundle, err := m.resolveCloudInit(ctx, machine)
+	if err != nil {
+		return nil, err
+	}
+	if ciBundle != nil {
+		disks, volumes = addCloudInitDisk(disks, volumes, ciBundle)
 	}
 
 	vm := m.buildVMSpec(ctx, &vmBuildParams{
