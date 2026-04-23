@@ -79,7 +79,7 @@ func (m *NetworkManager) GetOrCreateNetworkConfiguration(ctx context.Context, ma
 	//     static IP lands on a real L2 segment instead of KubeVirt's pod network, which runs
 	//     its own DHCP and would override the cidata-assigned address).
 	// DHCP NetworkNamespaces without a VLAN continue to use pod network (unchanged).
-	if !isStatic {
+	if vlanId <= 0 && !isStatic {
 		logger.Info("Using default pod network",
 			"namespace", machine.Namespace,
 			"reason", "DHCP NetworkNamespace without vlanId")
