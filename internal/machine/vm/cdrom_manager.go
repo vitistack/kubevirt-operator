@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -60,34 +61,57 @@ const (
 	AnnotationISOCleanedUp = "vitistack.io/iso-cleaned-up"
 )
 
+// ISOResourceName returns the name shared by the boot ISO's DataVolume, its
+// backing PVC, and the matching DataVolumeTemplates entry on the VM. Keep all
+// callers routed through this helper so the naming rule lives in one place.
+func ISOResourceName(vmName string) string {
+	return vmName + "-iso"
+}
+
 // ShouldCleanupISO determines if the ISO resources should be cleaned up.
 // The ISO DataVolume/PVC should be deleted when:
-// 1. Either AnnotationCDROMEjected or AnnotationOSInstalled is set to "true"
-// 2. The ISO hasn't already been cleaned up (to avoid repeated attempts)
+//  1. Either AnnotationCDROMEjected or AnnotationOSInstalled is set to "true".
+//  2. AND any of the following is true:
+//     a. The ISO hasn't been cleaned up yet (AnnotationISOCleanedUp != "true").
+//     b. AnnotationISOCleanedUp is set but the VM spec still references the
+//     CDROM volume — meaning a previous cleanup pass deleted DV/PVC without
+//     stripping the spec, leaving the PVC stuck in Terminating. Re-run the
+//     cleanup so the spec gets patched and storage is actually released.
 //
 // Note: This is purely for resource cleanup. Boot order ensures the root disk
 // (with installed OS) boots before the CDROM, so removal doesn't affect boot.
-func (m *VMManager) ShouldCleanupISO(machine *vitistackv1alpha1.Machine) bool {
-	// Check if cleanup is requested via annotations
+func (m *VMManager) ShouldCleanupISO(machine *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine) bool {
 	if !IsMarkedForCDROMRemoval(machine) {
 		return false
 	}
 
-	// Check if already cleaned up
-	if machine.Annotations[AnnotationISOCleanedUp] == AnnotationValueTrue {
-		return false
+	if machine.Annotations[AnnotationISOCleanedUp] != AnnotationValueTrue {
+		return true
 	}
 
-	return true
+	// Dedup says cleanup ran, but verify the spec is actually clean. If it
+	// still references the CDROM, the previous pass was incomplete (e.g. ran
+	// before this operator learned to patch the VM spec) and we must resume.
+	return HasCDROMVolume(vm)
 }
 
-// CleanupISOResources deletes the ISO DataVolume and PVC to free storage.
-// This is called when the machine is marked for CDROM removal via annotations.
-// The VM doesn't need to be modified - boot order ensures root disk boots first.
+// CleanupISOResources deletes the ISO DataVolume and PVC to free storage,
+// and strips the cdrom-iso Disk/Volume/DataVolumeTemplate references from
+// the VM spec so a future VMI restart doesn't fail trying to mount a now-
+// deleted volume. The VM-spec patch is non-disruptive: KubeVirt accepts it
+// on a running VM and applies it on the next VMI restart.
 func (m *VMManager) CleanupISOResources(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string) error {
 	logger := log.FromContext(ctx)
 
-	isoName := vmName + "-iso"
+	// Strip CDROM references from the VM spec first. Without this, the running
+	// virt-launcher pod keeps holding the PVC via kubernetes.io/pvc-protection
+	// (so the PVC sits in Terminating forever), and any future VMI restart
+	// would fail with a missing-volume error.
+	if err := m.removeCDROMFromVMSpec(ctx, machine, vmName); err != nil {
+		return fmt.Errorf("failed to remove CDROM from VM spec: %w", err)
+	}
+
+	isoName := ISOResourceName(vmName)
 	namespace := machine.Namespace
 
 	// Delete the DataVolume (this should cascade delete the PVC)
@@ -126,6 +150,74 @@ func (m *VMManager) CleanupISOResources(ctx context.Context, machine *vitistackv
 		"vm", vmName,
 		"reason", getCDROMRemovalReason(machine))
 
+	return nil
+}
+
+// removeCDROMFromVMSpec strips the cdrom-iso Disk, Volume, and matching
+// DataVolumeTemplate from the VM spec via a MergeFrom patch. Idempotent:
+// returns nil with no patch if the references are already absent or the VM
+// no longer exists.
+func (m *VMManager) removeCDROMFromVMSpec(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string) error {
+	logger := log.FromContext(ctx)
+
+	vm := &kubevirtv1.VirtualMachine{}
+	vmKey := types.NamespacedName{Name: vmName, Namespace: machine.Namespace}
+	if err := m.remoteClient.Get(ctx, vmKey, vm); err != nil {
+		if errors.IsNotFound(err) {
+			logger.V(1).Info("VM not found, skipping CDROM removal", "name", vmName)
+			return nil
+		}
+		return fmt.Errorf("failed to get VM: %w", err)
+	}
+
+	original := vm.DeepCopy()
+	dvName := ISOResourceName(vmName)
+	changed := false
+
+	if vm.Spec.Template != nil {
+		disks := vm.Spec.Template.Spec.Domain.Devices.Disks
+		filteredDisks := make([]kubevirtv1.Disk, 0, len(disks))
+		for i := range disks {
+			if disks[i].Name == CDROMVolumeName {
+				changed = true
+				continue
+			}
+			filteredDisks = append(filteredDisks, disks[i])
+		}
+		vm.Spec.Template.Spec.Domain.Devices.Disks = filteredDisks
+
+		volumes := vm.Spec.Template.Spec.Volumes
+		filteredVolumes := make([]kubevirtv1.Volume, 0, len(volumes))
+		for i := range volumes {
+			if volumes[i].Name == CDROMVolumeName {
+				changed = true
+				continue
+			}
+			filteredVolumes = append(filteredVolumes, volumes[i])
+		}
+		vm.Spec.Template.Spec.Volumes = filteredVolumes
+	}
+
+	dvts := vm.Spec.DataVolumeTemplates
+	filteredDVTs := make([]kubevirtv1.DataVolumeTemplateSpec, 0, len(dvts))
+	for i := range dvts {
+		if dvts[i].Name == dvName {
+			changed = true
+			continue
+		}
+		filteredDVTs = append(filteredDVTs, dvts[i])
+	}
+	vm.Spec.DataVolumeTemplates = filteredDVTs
+
+	if !changed {
+		return nil
+	}
+
+	patch := client.MergeFrom(original)
+	if err := m.remoteClient.Patch(ctx, vm, patch); err != nil {
+		return fmt.Errorf("failed to patch VM to remove CDROM references: %w", err)
+	}
+	logger.Info("Removed CDROM references from VM spec", "vm", vmName)
 	return nil
 }
 

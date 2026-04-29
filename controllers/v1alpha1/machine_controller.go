@@ -149,7 +149,7 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// Handle ISO cleanup if needed (delete DataVolume/PVC after OS installation)
 	// Boot order ensures root disk boots first, so this is purely for freeing storage
-	r.handleISOCleanup(ctx, machine, vmName)
+	r.handleISOCleanup(ctx, machine, virtualmachine, vmName)
 
 	vmi, vmiExists, err := r.getVMI(ctx, vmName, machine.Namespace, remoteClient)
 	if err != nil {
@@ -342,11 +342,11 @@ func (r *MachineReconciler) ensureVirtualMachine(ctx context.Context, machine *v
 // handleISOCleanup checks if ISO resources should be cleaned up and deletes them if needed.
 // This is called after the VM is created/fetched to handle ISO cleanup after OS installation.
 // Boot order ensures root disk boots first, so cleanup is purely for freeing storage.
-func (r *MachineReconciler) handleISOCleanup(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string) {
+func (r *MachineReconciler) handleISOCleanup(ctx context.Context, machine *vitistackv1alpha1.Machine, virtualmachine *kubevirtv1.VirtualMachine, vmName string) {
 	logger := log.FromContext(ctx)
 
 	// Check if ISO cleanup is needed
-	if !r.VMManager.ShouldCleanupISO(machine) {
+	if !r.VMManager.ShouldCleanupISO(machine, virtualmachine) {
 		return
 	}
 

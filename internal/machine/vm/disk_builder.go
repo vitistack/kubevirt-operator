@@ -167,7 +167,7 @@ func (m *VMManager) addISOBootSource(disks []kubevirtv1.Disk, volumes []kubevirt
 		Name: CDROMVolumeName,
 		VolumeSource: kubevirtv1.VolumeSource{
 			DataVolume: &kubevirtv1.DataVolumeSource{
-				Name: vmName + "-iso",
+				Name: ISOResourceName(vmName),
 			},
 		},
 	})
@@ -229,7 +229,7 @@ func (m *VMManager) buildDataVolumeTemplates(ctx context.Context, machine *vitis
 
 	template := kubevirtv1.DataVolumeTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: vmName + "-iso",
+			Name: ISOResourceName(vmName),
 			Labels: map[string]string{
 				vitistackv1alpha1.ManagedByAnnotation: viper.GetString(consts.MANAGED_BY),
 				"vitistack.io/source-machine":         machine.Name,
