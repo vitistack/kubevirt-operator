@@ -18,13 +18,20 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	// vitistackAPIGroup is the API group for vitistack CRD prerequisite checks.
+	vitistackAPIGroup = "vitistack.io"
+	// vitistackAPIVersion is the API version for vitistack.io CRD prerequisite checks.
+	vitistackAPIVersion = "v1alpha1"
+)
+
 func CheckPrerequisites() {
 	vlog.Info("Running prerequisite checks...")
 
 	checks := []crdcheck.Ref{
-		{Group: "vitistack.io", Version: "v1alpha1", Resource: "machines"},
-		{Group: "vitistack.io", Version: "v1alpha1", Resource: "kubevirtconfigs"},
-		{Group: "vitistack.io", Version: "v1alpha1", Resource: "networkconfigurations"},
+		{Group: vitistackAPIGroup, Version: vitistackAPIVersion, Resource: "machines"},
+		{Group: vitistackAPIGroup, Version: vitistackAPIVersion, Resource: "kubevirtconfigs"},
+		{Group: vitistackAPIGroup, Version: vitistackAPIVersion, Resource: "networkconfigurations"},
 	}
 
 	crdcheck.MustEnsureInstalled(context.TODO(), checks...)

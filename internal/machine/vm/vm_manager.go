@@ -34,6 +34,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+// LabelSourceMachine is the label key set on cluster-managed objects (VMs,
+// DataVolumeTemplates, NetworkConfigurations, ...) pointing back to the
+// originating Machine resource by name.
+const LabelSourceMachine = "vitistack.io/source-machine"
+
 // VMManager handles VirtualMachine-related operations
 type VMManager struct {
 	supervisorClient client.Client // Client for supervisor cluster (Machine CRDs)
@@ -91,7 +96,7 @@ func (m *VMManager) buildVMSpec(ctx context.Context, params *vmBuildParams) *kub
 			Namespace: params.machine.Namespace,
 			Labels: map[string]string{
 				vitistackv1alpha1.ManagedByAnnotation: viper.GetString(consts.MANAGED_BY),
-				"vitistack.io/source-machine":         params.machine.Name,
+				LabelSourceMachine:                    params.machine.Name,
 			},
 		},
 		Spec: kubevirtv1.VirtualMachineSpec{
@@ -101,7 +106,7 @@ func (m *VMManager) buildVMSpec(ctx context.Context, params *vmBuildParams) *kub
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						vitistackv1alpha1.ManagedByAnnotation: viper.GetString(consts.MANAGED_BY),
-						"vitistack.io/source-machine":         params.machine.Name,
+						LabelSourceMachine:                    params.machine.Name,
 					},
 				},
 				Spec: kubevirtv1.VirtualMachineInstanceSpec{

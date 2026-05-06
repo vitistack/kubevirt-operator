@@ -41,6 +41,9 @@ const (
 
 	// SourceTypeHTTP is the default source type for ISO boot
 	SourceTypeHTTP = "http"
+
+	// DefaultDiskName is the disk/volume name used when machine.spec.disks is empty.
+	DefaultDiskName = "root"
 )
 
 // buildDisksAndVolumes creates disk and volume specifications for the VM
@@ -59,7 +62,7 @@ func (m *VMManager) buildDisksAndVolumes(machine *vitistackv1alpha1.Machine, pvc
 	// If no disks are specified in the spec, create a default root disk
 	if len(machine.Spec.Disks) == 0 {
 		disks = append(disks, kubevirtv1.Disk{
-			Name: "root",
+			Name: DefaultDiskName,
 			DiskDevice: kubevirtv1.DiskDevice{
 				Disk: &kubevirtv1.DiskTarget{
 					Bus: BusTypeVirtio,
@@ -69,7 +72,7 @@ func (m *VMManager) buildDisksAndVolumes(machine *vitistackv1alpha1.Machine, pvc
 		})
 
 		volumes = append(volumes, kubevirtv1.Volume{
-			Name: "root",
+			Name: DefaultDiskName,
 			VolumeSource: kubevirtv1.VolumeSource{
 				PersistentVolumeClaim: &kubevirtv1.PersistentVolumeClaimVolumeSource{
 					PersistentVolumeClaimVolumeSource: corev1.PersistentVolumeClaimVolumeSource{
@@ -84,7 +87,7 @@ func (m *VMManager) buildDisksAndVolumes(machine *vitistackv1alpha1.Machine, pvc
 
 	// Create disks and volumes based on machine.spec.disks
 	for i, diskSpec := range machine.Spec.Disks {
-		diskName := "root"
+		diskName := DefaultDiskName
 		if diskSpec.Name != "" {
 			diskName = diskSpec.Name
 		} else if i > 0 {
@@ -232,7 +235,7 @@ func (m *VMManager) buildDataVolumeTemplates(ctx context.Context, machine *vitis
 			Name: ISOResourceName(vmName),
 			Labels: map[string]string{
 				vitistackv1alpha1.ManagedByAnnotation: viper.GetString(consts.MANAGED_BY),
-				"vitistack.io/source-machine":         machine.Name,
+				LabelSourceMachine:                    machine.Name,
 			},
 		},
 		Spec: cdiv1.DataVolumeSpec{

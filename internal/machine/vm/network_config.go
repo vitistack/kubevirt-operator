@@ -97,7 +97,7 @@ func (m *VMManager) persistMacAddressesToNetworkConfiguration(ctx context.Contex
 				Namespace: machine.Namespace,
 				Labels: map[string]string{
 					vitistackv1alpha1.ManagedByAnnotation: viper.GetString(consts.MANAGED_BY),
-					"vitistack.io/source-machine":         machine.Name,
+					LabelSourceMachine:                    machine.Name,
 				},
 			},
 			Spec: vitistackv1alpha1.NetworkConfigurationSpec{
@@ -204,10 +204,10 @@ func (m *VMManager) CleanupNetworkConfiguration(ctx context.Context, machine *vi
 		return fmt.Errorf("NetworkConfiguration managed-by label mismatch: expected '%s', got '%s'", expectedManagedBy, managedBy)
 	}
 
-	if sourceMachine, ok := labels["vitistack.io/source-machine"]; !ok || sourceMachine != machine.Name {
+	if sourceMachine, ok := labels[LabelSourceMachine]; !ok || sourceMachine != machine.Name {
 		logger.Info("NetworkConfiguration has unexpected source-machine label, skipping deletion",
 			"name", machine.Name,
-			"vitistack.io/source-machine", sourceMachine,
+			LabelSourceMachine, sourceMachine,
 			"expected", machine.Name)
 		return fmt.Errorf("NetworkConfiguration source-machine label mismatch: expected '%s', got '%s'", machine.Name, sourceMachine)
 	}
