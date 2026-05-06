@@ -71,7 +71,9 @@ func ISOResourceName(vmName string) string {
 // ShouldCleanupISO determines if the ISO resources should be cleaned up.
 // The ISO DataVolume/PVC should be deleted when:
 //  1. Either AnnotationCDROMEjected or AnnotationOSInstalled is set to "true".
-//  2. AND any of the following is true:
+//  2. The VMI has reported AgentConnected=True — proves the guest booted from
+//     disk and qemu-guest-agent is up, so the ISO is no longer in use.
+//  3. AND any of the following is true:
 //     a. The ISO hasn't been cleaned up yet (AnnotationISOCleanedUp != "true").
 //     b. AnnotationISOCleanedUp is set but the VM spec still references the
 //     CDROM volume — meaning a previous cleanup pass deleted DV/PVC without
@@ -80,8 +82,12 @@ func ISOResourceName(vmName string) string {
 //
 // Note: This is purely for resource cleanup. Boot order ensures the root disk
 // (with installed OS) boots before the CDROM, so removal doesn't affect boot.
-func (m *VMManager) ShouldCleanupISO(machine *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine) bool {
+func (m *VMManager) ShouldCleanupISO(machine *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine, vmi *kubevirtv1.VirtualMachineInstance) bool {
 	if !IsMarkedForCDROMRemoval(machine) {
+		return false
+	}
+
+	if !IsGuestAgentConnected(vmi) {
 		return false
 	}
 
@@ -93,6 +99,22 @@ func (m *VMManager) ShouldCleanupISO(machine *vitistackv1alpha1.Machine, vm *kub
 	// still references the CDROM, the previous pass was incomplete (e.g. ran
 	// before this operator learned to patch the VM spec) and we must resume.
 	return HasCDROMVolume(vm)
+}
+
+// IsGuestAgentConnected reports whether the VMI has a True AgentConnected
+// condition, meaning the qemu-guest-agent inside the guest is reachable.
+// Returns false for a nil VMI or when the condition is missing/False/Unknown.
+func IsGuestAgentConnected(vmi *kubevirtv1.VirtualMachineInstance) bool {
+	if vmi == nil {
+		return false
+	}
+	for i := range vmi.Status.Conditions {
+		c := &vmi.Status.Conditions[i]
+		if c.Type == kubevirtv1.VirtualMachineInstanceAgentConnected && c.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
 }
 
 // CleanupISOResources deletes the ISO DataVolume and PVC to free storage,

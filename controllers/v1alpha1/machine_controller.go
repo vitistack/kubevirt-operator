@@ -147,15 +147,16 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return result, err
 	}
 
-	// Handle ISO cleanup if needed (delete DataVolume/PVC after OS installation)
-	// Boot order ensures root disk boots first, so this is purely for freeing storage
-	r.handleISOCleanup(ctx, machine, virtualmachine, vmName)
-
 	vmi, vmiExists, err := r.getVMI(ctx, vmName, machine.Namespace, remoteClient)
 	if err != nil {
 		logger.Error(err, "Failed to get VirtualMachineInstance")
 		return ctrl.Result{}, err
 	}
+
+	// Handle ISO cleanup if needed (delete DataVolume/PVC after OS installation).
+	// Gated on the VMI's AgentConnected condition so we only remove the ISO once
+	// the guest has actually booted from disk; the 5s requeue keeps retrying.
+	r.handleISOCleanup(ctx, machine, virtualmachine, vmi, vmName)
 
 	// Log VMI status for debugging
 	if vmiExists {
@@ -340,13 +341,15 @@ func (r *MachineReconciler) ensureVirtualMachine(ctx context.Context, machine *v
 }
 
 // handleISOCleanup checks if ISO resources should be cleaned up and deletes them if needed.
-// This is called after the VM is created/fetched to handle ISO cleanup after OS installation.
+// This is called after the VM/VMI is fetched to handle ISO cleanup after OS installation.
 // Boot order ensures root disk boots first, so cleanup is purely for freeing storage.
-func (r *MachineReconciler) handleISOCleanup(ctx context.Context, machine *vitistackv1alpha1.Machine, virtualmachine *kubevirtv1.VirtualMachine, vmName string) {
+// Cleanup is gated on the VMI's AgentConnected condition so the ISO is only removed
+// once the guest has actually booted from disk.
+func (r *MachineReconciler) handleISOCleanup(ctx context.Context, machine *vitistackv1alpha1.Machine, virtualmachine *kubevirtv1.VirtualMachine, vmi *kubevirtv1.VirtualMachineInstance, vmName string) {
 	logger := log.FromContext(ctx)
 
 	// Check if ISO cleanup is needed
-	if !r.VMManager.ShouldCleanupISO(machine, virtualmachine) {
+	if !r.VMManager.ShouldCleanupISO(machine, virtualmachine, vmi) {
 		return
 	}
 
