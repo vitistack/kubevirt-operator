@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
+	vitistackv1alpha2 "github.com/vitistack/common/pkg/v1alpha2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -141,6 +142,11 @@ func (m *VMManager) synthesizeNetworkDataFromStaticIP(ctx context.Context, machi
 
 	if netNs.Spec.IPAllocation == nil || netNs.Spec.IPAllocation.Type != vitistackv1alpha1.IPAllocationTypeStatic {
 		return "", nil
+	}
+
+	// Gate on provisioningPhase — wait until the network segment is provisioned
+	if netNs.Status.ProvisioningPhase != "" && netNs.Status.ProvisioningPhase != string(vitistackv1alpha2.ProvisioningPhaseReady) {
+		return "", fmt.Errorf("NetworkNamespace %q not yet provisioned (phase: %s)", netNsName, netNs.Status.ProvisioningPhase)
 	}
 
 	nc := &vitistackv1alpha1.NetworkConfiguration{}

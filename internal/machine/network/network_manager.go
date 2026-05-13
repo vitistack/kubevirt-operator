@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/viper"
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
+	vitistackv1alpha2 "github.com/vitistack/common/pkg/v1alpha2"
 	"github.com/vitistack/kubevirt-operator/internal/consts"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -67,6 +68,11 @@ func (m *NetworkManager) GetOrCreateNetworkConfiguration(ctx context.Context, ma
 			"namespace", machine.Namespace,
 			"reason", "no NetworkNamespace")
 		return defaultPodNetwork(), nil
+	}
+
+	// Gate on provisioningPhase — wait until the network segment is provisioned
+	if networkNamespace.Status.ProvisioningPhase != "" && networkNamespace.Status.ProvisioningPhase != string(vitistackv1alpha2.ProvisioningPhaseReady) {
+		return nil, fmt.Errorf("NetworkNamespace %s not yet provisioned (phase: %s)", networkNamespace.Name, networkNamespace.Status.ProvisioningPhase)
 	}
 
 	vlanId := networkNamespace.Status.VlanID
