@@ -36,6 +36,7 @@ func Init() {
 	viper.SetDefault(consts.IP_SOURCE, "vmi")
 	viper.SetDefault(consts.KUBEVIRT_SUPPORT_CONTAINERIZED_DATA_IMPORTER, false)
 	viper.SetDefault(consts.NAME_MACHINE_PROVIDER, "kubevirt-provider")
+	viper.SetDefault(consts.MAX_CONCURRENT_RECONCILES, 5)
 
 	dotenv.LoadDotEnv()
 

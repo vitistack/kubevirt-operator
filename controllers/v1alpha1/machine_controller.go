@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
+	"github.com/vitistack/common/pkg/loggers/vlog"
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/internal/consts"
 	"github.com/vitistack/kubevirt-operator/internal/machine/events"
@@ -47,6 +48,7 @@ import (
 	kubevirtv1 "kubevirt.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -739,9 +741,16 @@ func (r *MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// VirtualMachine and VirtualMachineInstance resources exist on remote KubeVirt clusters,
 	// not on the supervisor cluster, so we don't set up watches for them here.
 	// Instead, we interact with them directly through the remote clients in the reconciliation loop.
+	maxConcurrent := viper.GetInt(consts.MAX_CONCURRENT_RECONCILES)
+	if maxConcurrent < 1 {
+		maxConcurrent = 1
+	}
+	vlog.Info(fmt.Sprintf("kubevirt-machine controller max concurrent reconciles: %d", maxConcurrent))
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vitistackv1alpha1.Machine{}).
 		WithEventFilter(kubevirtMachinePredicate).
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrent}).
 		Named("kubevirt-machine").
 		Complete(r)
 }
