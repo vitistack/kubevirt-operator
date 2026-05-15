@@ -149,6 +149,11 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return result, err
 	}
 
+	// Self-healing: backfill spec.provider on the Machine's NetworkConfiguration
+	// for legacy NCs created before kubevirt-operator started writing the field.
+	// No-op when nothing needs fixing; never fails the reconcile.
+	r.VMManager.EnsureNCProviderBackfilled(ctx, machine)
+
 	vmi, vmiExists, err := r.getVMI(ctx, vmName, machine.Namespace, remoteClient)
 	if err != nil {
 		logger.Error(err, "Failed to get VirtualMachineInstance")
