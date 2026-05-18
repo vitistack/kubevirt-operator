@@ -7,7 +7,7 @@ godebug default=go1.26
 require (
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.7.7
 	github.com/onsi/ginkgo/v2 v2.28.3
-	github.com/onsi/gomega v1.40.0
+	github.com/onsi/gomega v1.41.0
 	github.com/spf13/viper v1.21.0
 	github.com/vitistack/common v0.8.66
 	k8s.io/api v0.36.1
