@@ -222,6 +222,14 @@ func (r *MachineReconciler) ensureNamespaceExists(ctx context.Context, namespace
 	}
 
 	if err := remoteClient.Create(ctx, namespace); err != nil {
+		// Concurrent reconciles (MaxConcurrentReconciles > 1) can race here: all
+		// see NotFound on Get, then all Create. Treat AlreadyExists as success so
+		// the loser doesn't fail the whole reconcile (which would drop the 5s
+		// requeue in favor of error backoff and stall IP/status propagation).
+		if errors.IsAlreadyExists(err) {
+			logger.V(1).Info("Namespace already exists on remote cluster (created concurrently)", "namespace", namespaceName)
+			return nil
+		}
 		return fmt.Errorf("failed to create namespace on remote cluster: %w", err)
 	}
 
@@ -713,32 +721,35 @@ func NewMachineReconciler(c client.Client, scheme *runtime.Scheme, kubevirtClien
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Create predicate to filter only KubeVirt machines
-	// This prevents the reconciler from being triggered for machines with other providers
+	// Create predicate to filter only KubeVirt machines.
+	// This prevents the reconciler from being triggered for machines with other
+	// providers. Non-Machine objects (e.g. owned NetworkConfigurations watched
+	// via Owns below) are allowed through and mapped to their owning Machine;
+	// the reconcile re-validates the provider, so they don't bypass the filter.
 	kubevirtMachinePredicate := predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
 			if machine, ok := e.Object.(*vitistackv1alpha1.Machine); ok {
 				return r.isKubevirtProvider(machine)
 			}
-			return false
+			return true
 		},
 		UpdateFunc: func(e event.UpdateEvent) bool {
 			if machine, ok := e.ObjectNew.(*vitistackv1alpha1.Machine); ok {
 				return r.isKubevirtProvider(machine)
 			}
-			return false
+			return true
 		},
 		DeleteFunc: func(e event.DeleteEvent) bool {
 			if machine, ok := e.Object.(*vitistackv1alpha1.Machine); ok {
 				return r.isKubevirtProvider(machine)
 			}
-			return false
+			return true
 		},
 		GenericFunc: func(e event.GenericEvent) bool {
 			if machine, ok := e.Object.(*vitistackv1alpha1.Machine); ok {
 				return r.isKubevirtProvider(machine)
 			}
-			return false
+			return true
 		},
 	}
 
@@ -746,6 +757,14 @@ func (r *MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// VirtualMachine and VirtualMachineInstance resources exist on remote KubeVirt clusters,
 	// not on the supervisor cluster, so we don't set up watches for them here.
 	// Instead, we interact with them directly through the remote clients in the reconciliation loop.
+	//
+	// We DO own and watch NetworkConfiguration (a supervisor-cluster resource the
+	// kubevirt-operator creates per Machine). The Machine's public IP is sourced
+	// from the NetworkConfiguration status (IP_SOURCE=networkconfiguration), which
+	// is populated asynchronously by the kea-operator after the DHCP reservation
+	// resolves. Without this watch the IP only propagated to the Machine on the
+	// next periodic requeue — minutes later. Owning it re-triggers the Machine
+	// reconcile the instant its NetworkConfiguration status changes.
 	maxConcurrent := viper.GetInt(consts.MAX_CONCURRENT_RECONCILES)
 	if maxConcurrent < 1 {
 		maxConcurrent = 1
@@ -754,6 +773,7 @@ func (r *MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&vitistackv1alpha1.Machine{}).
+		Owns(&vitistackv1alpha1.NetworkConfiguration{}).
 		WithEventFilter(kubevirtMachinePredicate).
 		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrent}).
 		Named("kubevirt-machine").
