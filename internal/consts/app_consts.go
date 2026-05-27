@@ -1,9 +1,17 @@
 package consts
 
 const (
-	DEVELOPMENT                               = "DEVELOPMENT"
-	NAMESPACE                                 = "NAMESPACE"
-	CPU_MODEL                                 = "CPU_MODEL"
+	DEVELOPMENT = "DEVELOPMENT"
+	NAMESPACE   = "NAMESPACE"
+	CPU_MODEL   = "CPU_MODEL"
+	// DISABLE_CPU_HT_FEATURE, when true, adds a `disable` policy for the "ht"
+	// CPU feature on host-model VMs. Workaround for a libvirt host-model
+	// regression (KubeVirt >= v1.8.0) where the expanded host-model CPU requires
+	// the "ht" (HTT) CPUID flag that QEMU does not expose for the guest topology,
+	// making check='full' validation fail ("guest CPU doesn't match
+	// specification: extra features: ht") so the VM never starts. Enabled by
+	// default; opt out per cluster by setting it to false.
+	DISABLE_CPU_HT_FEATURE                    = "DISABLE_CPU_HT_FEATURE"
 	NETWORK_ATTACHMENT_DEFINITION_CNI_VERSION = "NETWORK_ATTACHMENT_DEFINITION_CNI_VERSION"
 	LOG_LEVEL                                 = "LOG_LEVEL"
 	LOG_JSON                                  = "LOG_JSON"

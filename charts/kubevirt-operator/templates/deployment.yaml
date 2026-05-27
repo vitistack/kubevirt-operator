@@ -54,6 +54,10 @@ spec:
             - name: CPU_MODEL
               value: {{ .Values.cpuModel | quote }}
             {{- end }}
+            {{- if .Values.disableHtCpuFeature }}
+            - name: DISABLE_CPU_HT_FEATURE
+              value: {{ .Values.disableHtCpuFeature | quote }}
+            {{- end }}
             {{- if .Values.nadCniVersion }}
             - name: NETWORK_ATTACHMENT_DEFINITION_CNI_VERSION
               value: {{ .Values.nadCniVersion | quote }}
