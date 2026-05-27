@@ -45,6 +45,7 @@ The operator can be configured using environment variables:
 ### Virtual Machine Configuration
 
 - **`CPU_MODEL`**: CPU model for VMs (default: `host-model` for x86_64, `host-passthrough` for ARM)
+- **`DISABLE_CPU_HT_FEATURE`**: Disable the `ht` CPU feature on `host-model` VMs (default: `true`). Workaround for a libvirt host-model regression in KubeVirt ≥ v1.8.0 where VMs fail to start with `guest CPU doesn't match specification: extra features: ht`. Only affects `host-model`; ignored for other CPU models. See [docs/disable-ht-cpu-feature.md](docs/disable-ht-cpu-feature.md).
 - **`VM_NAME_PREFIX`**: Prefix for VM names (default: `vm-`)
 
 ### Network Configuration

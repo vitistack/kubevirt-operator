@@ -136,6 +136,11 @@ affinity: {}
 namespace: ""
 # CPU model for VMs: "host-model" (default for x86), "host-passthrough" (required for ARM)
 cpuModel: ""
+# Disable the "ht" CPU feature on host-model VMs. Workaround for a libvirt
+# host-model regression (KubeVirt >= v1.8.0) where the VM fails to start with
+# "guest CPU doesn't match specification: extra features: ht". Only affects
+# host-model VMs; leave false unless the cluster hits this. Default: true.
+disableHtCpuFeature: true
 # CNI version for NetworkAttachmentDefinitions
 nadCniVersion: "1.0.0"
 # Where to fetch public IPs from: "vmi" (default, from KubeVirt VMI) or "networkconfiguration"
