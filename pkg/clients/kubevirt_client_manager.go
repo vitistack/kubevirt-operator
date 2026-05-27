@@ -23,6 +23,7 @@ import (
 
 	"github.com/spf13/viper"
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
+	"github.com/vitistack/kubevirt-operator/internal/consts"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -137,6 +138,20 @@ func (m *KubevirtClientManager) restConfigForKubevirtConfig(ctx context.Context,
 	if err != nil {
 		return nil, fmt.Errorf("failed to create REST config from kubeconfig: %w", err)
 	}
+
+	// Raise the client-side throttle above client-go's defaults (5 QPS / 10
+	// burst). This controller issues several remote API calls per reconcile
+	// (namespace, PVC, VM, VMI, NAD) across many Machines on a short requeue
+	// interval, so the default limiter queues requests and they can surface as
+	// "client rate limiter Wait returned an error" under load. A value <= 0
+	// leaves the client-go default in place.
+	if qps := viper.GetInt(consts.REMOTE_CLIENT_QPS); qps > 0 {
+		restConfig.QPS = float32(qps)
+	}
+	if burst := viper.GetInt(consts.REMOTE_CLIENT_BURST); burst > 0 {
+		restConfig.Burst = burst
+	}
+
 	return restConfig, nil
 }
 

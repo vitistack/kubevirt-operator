@@ -320,6 +320,25 @@ func (r *MachineReconciler) ensureVirtualMachine(ctx context.Context, machine *v
 		}
 
 		logger.Info("VirtualMachine not found, creating new VM", "vm", vmName, "namespace", machine.Namespace)
+
+		// When the boot ISO is shared per version, ensure the version-named
+		// DataVolume exists and has finished importing before creating a VM that
+		// references it read-only. A VM mounting a half-imported PVC would fail to
+		// boot, so requeue until the import is ready.
+		if vm.IsSharedBootISOEnabled() &&
+			machine.Annotations[vm.AnnotationBootSource] == vm.BootSourceDataVolume &&
+			machine.Spec.OS.ImageID != "" {
+			ready, isoName, isoErr := r.VMManager.EnsureSharedISODataVolume(ctx, machine)
+			if isoErr != nil {
+				logger.Error(isoErr, "Failed to ensure shared boot-ISO DataVolume")
+				return nil, vmName, ctrl.Result{RequeueAfter: RequeueDelay}, true, isoErr
+			}
+			if !ready {
+				logger.Info("Waiting for shared boot-ISO import to complete", "iso", isoName)
+				return nil, vmName, ctrl.Result{RequeueAfter: RequeueDelay}, true, nil
+			}
+		}
+
 		pvcNames, pvcErr := r.StorageManager.CreatePVCsFromDiskSpecs(ctx, machine, vmName, remoteClient)
 		if pvcErr != nil {
 			logger.Error(pvcErr, "Failed to create PVCs")
@@ -492,6 +511,10 @@ func (r *MachineReconciler) cleanupRemoteResources(ctx context.Context, machine 
 			"virtualmachine", vmKey.Name)
 		return ctrl.Result{Requeue: true}, nil
 	}
+
+	// The VM is gone, so its reference no longer keeps any shared boot-ISO volume
+	// alive. Reclaim shared ISOs in this namespace that are now unreferenced.
+	r.VMManager.GCOrphanedSharedISOs(ctx, machine.Namespace)
 
 	r.finalizeNADCleanup(ctx, machine, nadName, remoteClient)
 
