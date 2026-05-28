@@ -34,10 +34,16 @@ func Init() {
 	viper.SetDefault(consts.PVC_VOLUME_MODE, "Block")         // Options: "Block" (default) or "Filesystem"
 	viper.SetDefault(consts.PVC_ACCESS_MODE, "ReadWriteMany") // Options: "ReadWriteMany" (default), "ReadWriteOnce", "ReadOnlyMany"
 	viper.SetDefault(consts.STORAGE_CLASS_NAME, "")           // Empty means use cluster's default storage class
+	viper.SetDefault(consts.STORAGE_CLASS_NAME_ISO, "")                     // Empty falls back to STORAGE_CLASS_NAME, then cluster default
+	viper.SetDefault(consts.SHARED_BOOT_ISO, true)                          // Share one version-named boot-ISO PVC per namespace
+	viper.SetDefault(consts.SHARED_BOOT_ISO_ACCESS_MODE, "ReadWriteMany")   // Shared ISO must be RWX to attach across nodes
+	viper.SetDefault(consts.SHARED_ISO_PVC_VOLUME_MODE, "Filesystem")       // Shared ISO volume mode; must be RWX-compatible on the resolved class
 	viper.SetDefault(consts.IP_SOURCE, "vmi")
 	viper.SetDefault(consts.KUBEVIRT_SUPPORT_CONTAINERIZED_DATA_IMPORTER, false)
 	viper.SetDefault(consts.NAME_MACHINE_PROVIDER, "kubevirt-provider")
 	viper.SetDefault(consts.MAX_CONCURRENT_RECONCILES, 5)
+	viper.SetDefault(consts.REMOTE_CLIENT_QPS, 50)    // client-go default is 5; raise for per-reconcile call volume
+	viper.SetDefault(consts.REMOTE_CLIENT_BURST, 100) // client-go default is 10
 
 	dotenv.LoadDotEnv()
 

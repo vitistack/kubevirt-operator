@@ -42,6 +42,9 @@ const (
 	// SourceTypeHTTP is the default source type for ISO boot
 	SourceTypeHTTP = "http"
 
+	// SourceTypeHTTPS is the TLS source type for ISO boot
+	SourceTypeHTTPS = "https"
+
 	// DefaultDiskName is the disk/volume name used when machine.spec.disks is empty.
 	DefaultDiskName = "root"
 )
@@ -149,8 +152,20 @@ func determineBusType(diskType string) kubevirtv1.DiskBus {
 	}
 }
 
-// addISOBootSource adds an ISO image as a CDROM boot source
-func (m *VMManager) addISOBootSource(disks []kubevirtv1.Disk, volumes []kubevirtv1.Volume, vmName string) ([]kubevirtv1.Disk, []kubevirtv1.Volume) {
+// addISOBootSource adds an ISO image as a CDROM boot source.
+//
+// When the shared boot-ISO feature is enabled the CDROM references the shared,
+// version-named PVC (created out-of-band by EnsureSharedISODataVolume) so many
+// VMs can mount the same immutable image concurrently. Otherwise it references a
+// per-VM DataVolume named "<vmName>-iso".
+//
+// The volume is intentionally NOT mounted read-only: with a Filesystem-mode PVC
+// (how CDI imports the ISO) virt-launcher must chown the backing directory, and
+// a read-only mount makes that chown fail ("read-only file system"), preventing
+// VMI startup. Write protection instead comes from the CDRom device type — qemu
+// opens CDRom media read-only, so the guest cannot mutate the shared image; the
+// only writes to the shared PVC are idempotent ownership metadata ops.
+func (m *VMManager) addISOBootSource(disks []kubevirtv1.Disk, volumes []kubevirtv1.Volume, machine *vitistackv1alpha1.Machine, vmName string) ([]kubevirtv1.Disk, []kubevirtv1.Volume) {
 	// Add CDROM disk for ISO with boot order 2 (after root disk)
 	// This allows booting from ISO for installation, but prioritizes
 	// the root disk after OS installation completes
@@ -165,15 +180,32 @@ func (m *VMManager) addISOBootSource(disks []kubevirtv1.Disk, volumes []kubevirt
 		BootOrder: &bootOrder,
 	})
 
-	// Add volume referencing the DataVolume
-	volumes = append(volumes, kubevirtv1.Volume{
-		Name: CDROMVolumeName,
-		VolumeSource: kubevirtv1.VolumeSource{
-			DataVolume: &kubevirtv1.DataVolumeSource{
-				Name: ISOResourceName(vmName),
+	if IsSharedBootISOEnabled() {
+		// Reference the shared PVC directly. Not read-only: see the function
+		// doc — the CDRom device, not the volume flag, provides write
+		// protection, and a read-only Filesystem mount breaks virt-launcher's
+		// ownership chown.
+		volumes = append(volumes, kubevirtv1.Volume{
+			Name: CDROMVolumeName,
+			VolumeSource: kubevirtv1.VolumeSource{
+				PersistentVolumeClaim: &kubevirtv1.PersistentVolumeClaimVolumeSource{
+					PersistentVolumeClaimVolumeSource: corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: SharedISOResourceName(machine),
+					},
+				},
 			},
-		},
-	})
+		})
+	} else {
+		// Per-VM DataVolume (provisioned via the VM's DataVolumeTemplates).
+		volumes = append(volumes, kubevirtv1.Volume{
+			Name: CDROMVolumeName,
+			VolumeSource: kubevirtv1.VolumeSource{
+				DataVolume: &kubevirtv1.DataVolumeSource{
+					Name: ISOResourceName(vmName),
+				},
+			},
+		})
+	}
 
 	// Root disk keeps boot order 1, ISO is boot order 2
 	// Most firmware will skip empty disks and boot from ISO on first run
@@ -191,6 +223,13 @@ func (m *VMManager) buildDataVolumeTemplates(ctx context.Context, machine *vitis
 		return nil
 	}
 
+	// When the boot ISO is shared, the volume is a standalone DataVolume/PVC
+	// managed by EnsureSharedISODataVolume and referenced as a read-only PVC —
+	// no per-VM DataVolumeTemplate is emitted.
+	if IsSharedBootISOEnabled() {
+		return nil
+	}
+
 	// Determine source type (http, registry, pvc, etc.)
 	sourceType := machine.Annotations["kubevirt.io/boot-source-type"]
 	if sourceType == "" {
@@ -204,8 +243,8 @@ func (m *VMManager) buildDataVolumeTemplates(ctx context.Context, machine *vitis
 	// ISO images require Filesystem volume mode for CDROM
 	filesystemMode := corev1.PersistentVolumeFilesystem
 
-	// Get storage class from config (empty means use cluster default)
-	storageClassName := viper.GetString(consts.STORAGE_CLASS_NAME)
+	// Get storage class for ISO volumes (ISO override, else general, else default)
+	storageClassName := resolveISOStorageClass()
 
 	// Resolve the access mode the same way the root PVC does: prefer what
 	// CDI's StorageProfile reports for this StorageClass, fall back to the
@@ -259,7 +298,7 @@ func (m *VMManager) buildDataVolumeTemplates(ctx context.Context, machine *vitis
 
 	// Build the DataVolume source based on type
 	switch sourceType {
-	case "http", "https":
+	case SourceTypeHTTP, SourceTypeHTTPS:
 		template.Spec.Source = &cdiv1.DataVolumeSource{
 			HTTP: &cdiv1.DataVolumeSourceHTTP{
 				URL: machine.Spec.OS.ImageID,
@@ -289,7 +328,7 @@ func getISOStorageSize(ctx context.Context, imageURL string, sourceType string) 
 	logger := log.FromContext(ctx)
 
 	// Only HTTP/HTTPS sources support HEAD requests
-	if sourceType != SourceTypeHTTP && sourceType != "https" {
+	if sourceType != SourceTypeHTTP && sourceType != SourceTypeHTTPS {
 		return resource.MustParse(DefaultISOStorageSize)
 	}
 

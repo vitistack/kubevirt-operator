@@ -133,6 +133,16 @@ func (m *VMManager) CleanupISOResources(ctx context.Context, machine *vitistackv
 		return fmt.Errorf("failed to remove CDROM from VM spec: %w", err)
 	}
 
+	// In shared mode the boot ISO is a version-named volume reused by other VMs,
+	// so detaching the CDROM (above) is the whole cleanup — the shared
+	// DataVolume/PVC must be left intact. Orphaned shared volumes are reclaimed
+	// separately during machine deletion (see GC in the storage manager).
+	if IsSharedBootISOEnabled() {
+		logger.Info("Detached shared boot ISO from VM (shared volume retained)",
+			"vm", vmName, "reason", getCDROMRemovalReason(machine))
+		return nil
+	}
+
 	isoName := ISOResourceName(vmName)
 	namespace := machine.Namespace
 

@@ -180,7 +180,7 @@ func (m *VMManager) CreateVirtualMachine(
 
 	// Add boot source (ISO) if specified
 	if machine.Annotations[AnnotationBootSource] == BootSourceDataVolume && machine.Spec.OS.ImageID != "" {
-		disks, volumes = m.addISOBootSource(disks, volumes, vmName)
+		disks, volumes = m.addISOBootSource(disks, volumes, machine, vmName)
 	}
 
 	// Calculate resource requirements (validates MachineClass from supervisor cluster)
