@@ -243,8 +243,8 @@ func (m *VMManager) buildDataVolumeTemplates(ctx context.Context, machine *vitis
 	// ISO images require Filesystem volume mode for CDROM
 	filesystemMode := corev1.PersistentVolumeFilesystem
 
-	// Get storage class from config (empty means use cluster default)
-	storageClassName := viper.GetString(consts.STORAGE_CLASS_NAME)
+	// Get storage class for ISO volumes (ISO override, else general, else default)
+	storageClassName := resolveISOStorageClass()
 
 	// Resolve the access mode the same way the root PVC does: prefer what
 	// CDI's StorageProfile reports for this StorageClass, fall back to the

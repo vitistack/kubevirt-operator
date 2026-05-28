@@ -54,6 +54,18 @@ func IsSharedBootISOEnabled() bool {
 	return viper.GetBool(consts.SHARED_BOOT_ISO)
 }
 
+// resolveISOStorageClass returns the storage class for boot-ISO volumes. Boot
+// ISOs may need a different class than root disks (e.g. a shared RWX ISO must
+// live on CephFS while root disks use Ceph RBD), so an ISO-specific override is
+// honoured first. Resolution: STORAGE_CLASS_NAME_ISO if set, else
+// STORAGE_CLASS_NAME, else "" (the cluster's default storage class).
+func resolveISOStorageClass() string {
+	if sc := viper.GetString(consts.STORAGE_CLASS_NAME_ISO); sc != "" {
+		return sc
+	}
+	return viper.GetString(consts.STORAGE_CLASS_NAME)
+}
+
 // knownArches are the architecture tokens recognised in an ISO filename so they
 // can be split out from the image variant (e.g. "nocloud-amd64" -> "amd64").
 var knownArches = map[string]struct{}{
@@ -258,8 +270,13 @@ func (m *VMManager) buildSharedISODataVolume(ctx context.Context, machine *vitis
 	}
 
 	storageSize := getISOStorageSize(ctx, machine.Spec.OS.ImageID, sourceType)
-	filesystemMode := corev1.PersistentVolumeFilesystem
-	storageClassName := viper.GetString(consts.STORAGE_CLASS_NAME)
+
+	volumeMode := corev1.PersistentVolumeFilesystem
+	if modeStr := viper.GetString(consts.SHARED_ISO_PVC_VOLUME_MODE); modeStr != "" {
+		volumeMode = corev1.PersistentVolumeMode(modeStr)
+	}
+
+	storageClassName := resolveISOStorageClass()
 
 	accessMode := corev1.PersistentVolumeAccessMode(viper.GetString(consts.SHARED_BOOT_ISO_ACCESS_MODE))
 	if accessMode == "" {
@@ -290,7 +307,7 @@ func (m *VMManager) buildSharedISODataVolume(ctx context.Context, machine *vitis
 						corev1.ResourceStorage: storageSize,
 					},
 				},
-				VolumeMode:  &filesystemMode,
+				VolumeMode:  &volumeMode,
 				AccessModes: accessModes,
 			},
 		},
