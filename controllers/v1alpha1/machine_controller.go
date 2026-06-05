@@ -790,7 +790,7 @@ func (r *MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// reconcile the instant its NetworkConfiguration status changes.
 	maxConcurrent := viper.GetInt(consts.MAX_CONCURRENT_RECONCILES)
 	if maxConcurrent < 1 {
-		maxConcurrent = 1
+		maxConcurrent = 5
 	}
 	vlog.Info(fmt.Sprintf("kubevirt-machine controller max concurrent reconciles: %d", maxConcurrent))
 

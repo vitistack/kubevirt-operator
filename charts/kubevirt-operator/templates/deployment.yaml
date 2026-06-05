@@ -46,6 +46,9 @@ spec:
             - --metrics-secure={{ .Values.metrics.secure }}
             - --leader-elect={{ .Values.leaderElection.enabled }}
           env:
+            # Controller concurrency: max objects reconciled in parallel
+            - name: MAX_CONCURRENT_RECONCILES
+              value: {{ .Values.maxConcurrentReconciles | default 5 | quote }}
             - name: NAMESPACE
               valueFrom:
                 fieldRef:
