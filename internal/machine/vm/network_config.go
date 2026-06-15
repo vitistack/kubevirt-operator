@@ -91,6 +91,18 @@ func (m *VMManager) persistMacAddressesToNetworkConfiguration(ctx context.Contex
 		// NetworkConfiguration doesn't exist, create a new one
 		// Generate a shortened name for spec.name to comply with 32-byte limit
 		shortName := generateShortNetworkConfigName(machine.Name)
+
+		// Resolve the IP-allocation provider from the referenced NetworkNamespace
+		// so the new NC declares which operator owns it (kea / static-ip-operator
+		// / etc.). Without this, downstream allocator operators must fall back
+		// to a deprecated default and emit a per-NC warning on every reconcile.
+		// Missing NN or missing ipAllocation leaves Provider empty — same as the
+		// pre-fix behavior, so legacy NNs continue to work.
+		provider, err := m.resolveNCProvider(ctx, machine)
+		if err != nil {
+			return err
+		}
+
 		netConfig := &vitistackv1alpha1.NetworkConfiguration{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      machine.Name,
@@ -104,6 +116,7 @@ func (m *VMManager) persistMacAddressesToNetworkConfiguration(ctx context.Contex
 				NetworkNamespaceName: machine.Spec.Network.NetworkNamespaceName,
 				Name:                 shortName,
 				Description:          "Network configuration for machine " + machine.Name,
+				Provider:             provider,
 				NetworkInterfaces: []vitistackv1alpha1.NetworkConfigurationInterface{
 					networkInterface,
 				},
@@ -145,6 +158,15 @@ func (m *VMManager) persistMacAddressesToNetworkConfiguration(ctx context.Contex
 		changed = true
 	}
 
+	// Backfill spec.provider on legacy NCs created before we wrote it.
+	providerChanged, err := m.backfillNCProvider(ctx, machine, existingNetConfig)
+	if err != nil {
+		return err
+	}
+	if providerChanged {
+		changed = true
+	}
+
 	if !changed {
 		return nil
 	}
@@ -155,6 +177,103 @@ func (m *VMManager) persistMacAddressesToNetworkConfiguration(ctx context.Contex
 
 	logger.Info("Updated NetworkConfiguration", "name", existingNetConfig.Name, "macAddress", macAddress)
 	return nil
+}
+
+// backfillNCProvider sets spec.provider on an existing NC when it's unset.
+// Each machine reconcile is a migration opportunity: if the referenced NN
+// declares a provider and the NC still has it empty, copy it over. We only
+// write when the NC carries our managed-by label so we never silently modify
+// NCs owned by another controller. Returns whether the spec was mutated.
+func (m *VMManager) backfillNCProvider(
+	ctx context.Context,
+	machine *vitistackv1alpha1.Machine,
+	nc *vitistackv1alpha1.NetworkConfiguration,
+) (bool, error) {
+	if nc.Spec.Provider != "" || !hasManagedByLabel(nc) {
+		return false, nil
+	}
+	provider, err := m.resolveNCProvider(ctx, machine)
+	if err != nil {
+		return false, err
+	}
+	if provider == "" {
+		return false, nil
+	}
+	nc.Spec.Provider = provider
+	log.FromContext(ctx).Info("Backfilling spec.provider on legacy NetworkConfiguration",
+		"name", nc.Name, "provider", provider)
+	return true, nil
+}
+
+// hasManagedByLabel reports whether the NC carries this operator's managed-by
+// label. We use it to gate spec edits to NCs we created, so we never silently
+// modify NCs owned by another controller.
+func hasManagedByLabel(nc *vitistackv1alpha1.NetworkConfiguration) bool {
+	if nc == nil {
+		return false
+	}
+	expected := viper.GetString(consts.MANAGED_BY)
+	if expected == "" {
+		return false
+	}
+	return nc.GetLabels()[vitistackv1alpha1.ManagedByAnnotation] == expected
+}
+
+// EnsureNCProviderBackfilled is a self-healing pass that backfills spec.provider
+// on the Machine's NetworkConfiguration without waiting for VM creation. It is
+// safe to call on every Machine reconcile: when the NC is missing, foreign-owned,
+// or already has a provider, it's a no-op (no API write). Only triggers an
+// Update when there's a real change to commit. Logs and swallows errors so a
+// transient failure doesn't fail the reconcile — the next reconcile will retry.
+func (m *VMManager) EnsureNCProviderBackfilled(ctx context.Context, machine *vitistackv1alpha1.Machine) {
+	logger := log.FromContext(ctx)
+	nc := &vitistackv1alpha1.NetworkConfiguration{}
+	if err := m.supervisorClient.Get(ctx, client.ObjectKey{Name: machine.Name, Namespace: machine.Namespace}, nc); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			return
+		}
+		logger.V(1).Info("provider backfill: get NetworkConfiguration failed (will retry)",
+			"machine", machine.Name, "namespace", machine.Namespace, "error", err.Error())
+		return
+	}
+	changed, err := m.backfillNCProvider(ctx, machine, nc)
+	if err != nil {
+		logger.V(1).Info("provider backfill: resolve provider failed (will retry)",
+			"machine", machine.Name, "namespace", machine.Namespace, "error", err.Error())
+		return
+	}
+	if !changed {
+		return
+	}
+	if err := m.supervisorClient.Update(ctx, nc); err != nil {
+		logger.V(1).Info("provider backfill: update NetworkConfiguration failed (will retry)",
+			"machine", machine.Name, "namespace", machine.Namespace, "error", err.Error())
+	}
+}
+
+// resolveNCProvider returns the IP-allocation provider declared on the
+// referenced NetworkNamespace, or "" if the NN can't be fetched or has no
+// ipAllocation block. A NotFound NN is treated as "no provider yet" (a NN
+// that hasn't been migrated, or is being created in parallel) so we still
+// create the NC; downstream operators will warn until the NN is populated.
+// Hard errors (anything other than NotFound) are propagated so a transient
+// API failure doesn't silently produce a wrong-provider NC.
+func (m *VMManager) resolveNCProvider(ctx context.Context, machine *vitistackv1alpha1.Machine) (string, error) {
+	nnName := machine.Spec.Network.NetworkNamespaceName
+	if nnName == "" {
+		return "", nil
+	}
+	nn := &vitistackv1alpha1.NetworkNamespace{}
+	if err := m.supervisorClient.Get(ctx, client.ObjectKey{Name: nnName, Namespace: machine.Namespace}, nn); err != nil {
+		if client.IgnoreNotFound(err) != nil {
+			return "", fmt.Errorf("get NetworkNamespace %q for provider resolution: %w", nnName, err)
+		}
+		return "", nil
+	}
+	if nn.Spec.IPAllocation == nil {
+		return "", nil
+	}
+	return nn.Spec.IPAllocation.Provider, nil
 }
 
 // resolveOrGenerateMAC returns the MAC already persisted on the Machine's

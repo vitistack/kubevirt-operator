@@ -23,6 +23,7 @@ import (
 
 	"github.com/spf13/viper"
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
+	"github.com/vitistack/kubevirt-operator/internal/consts"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -56,12 +57,16 @@ func NewKubevirtClientManager(supervisorClient client.Client, scheme *runtime.Sc
 	}
 }
 
-// GetClientForConfig returns a Kubernetes client for the specified KubevirtConfig
-// The client is cached and reused for subsequent calls
+// GetClientForConfig returns a Kubernetes client for the specified KubevirtConfig.
+// The client is built once per config and cached for subsequent calls.
+//
+// Concurrent first-callers (e.g. parallel Machine reconciles at startup) all
+// serialize behind a single build via double-checked locking. Without this,
+// every concurrent goroutine that observes an empty cache would build its own
+// client, log a creation message, and only one would end up cached — wasting
+// REST-config + client constructions and producing N-1 misleading log lines.
 func (m *KubevirtClientManager) GetClientForConfig(ctx context.Context, kubevirtConfigName string) (client.Client, error) {
-	logger := log.FromContext(ctx)
-
-	// Check if we already have a cached client
+	// Fast path: cached?
 	m.mu.RLock()
 	if cachedClient, exists := m.clients[kubevirtConfigName]; exists {
 		m.mu.RUnlock()
@@ -69,63 +74,85 @@ func (m *KubevirtClientManager) GetClientForConfig(ctx context.Context, kubevirt
 	}
 	m.mu.RUnlock()
 
-	// Fetch the KubevirtConfig CRD (cluster-scoped, no namespace)
+	// Slow path: build under the write lock so concurrent cold-cache callers
+	// serialize behind a single build rather than each building their own.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if cachedClient, exists := m.clients[kubevirtConfigName]; exists {
+		return cachedClient, nil
+	}
+
+	remoteClient, err := m.buildClientForConfig(ctx, kubevirtConfigName)
+	if err != nil {
+		return nil, err
+	}
+	m.clients[kubevirtConfigName] = remoteClient
+	log.FromContext(ctx).Info("Created and cached Kubernetes client for KubevirtConfig", "config", kubevirtConfigName)
+	return remoteClient, nil
+}
+
+// buildClientForConfig constructs a fresh Kubernetes client for the given
+// KubevirtConfig by reading the referenced kubeconfig secret. Does no caching.
+func (m *KubevirtClientManager) buildClientForConfig(ctx context.Context, kubevirtConfigName string) (client.Client, error) {
+	restConfig, err := m.restConfigForKubevirtConfig(ctx, kubevirtConfigName)
+	if err != nil {
+		return nil, err
+	}
+	remoteClient, err := client.New(restConfig, client.Options{Scheme: m.scheme})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Kubernetes client: %w", err)
+	}
+	return remoteClient, nil
+}
+
+// restConfigForKubevirtConfig fetches the kubeconfig secret referenced by the
+// named KubevirtConfig and returns a parsed REST config. Used by both client
+// builds and consumers that need direct REST access (informers, etc.).
+func (m *KubevirtClientManager) restConfigForKubevirtConfig(ctx context.Context, kubevirtConfigName string) (*rest.Config, error) {
 	kubevirtConfig := &vitistackv1alpha1.KubevirtConfig{}
-	if err := m.supervisorClient.Get(ctx, types.NamespacedName{
-		Name: kubevirtConfigName,
-	}, kubevirtConfig); err != nil {
+	if err := m.supervisorClient.Get(ctx, types.NamespacedName{Name: kubevirtConfigName}, kubevirtConfig); err != nil {
 		if errors.IsNotFound(err) {
 			return nil, fmt.Errorf("KubevirtConfig %s not found", kubevirtConfigName)
 		}
 		return nil, fmt.Errorf("failed to get KubevirtConfig: %w", err)
 	}
 
-	// Get the kubeconfig secret (secrets are namespaced)
 	secretName := kubevirtConfig.Spec.KubeconfigSecretRef
 	if secretName == "" {
 		return nil, fmt.Errorf("KubevirtConfig %s has no kubeconfigSecretRef", kubevirtConfigName)
 	}
-
 	secretNamespace := kubevirtConfig.Spec.SecretNamespace
 	if secretNamespace == "" {
 		return nil, fmt.Errorf("KubevirtConfig %s has no secretNamespace", kubevirtConfigName)
 	}
 
 	secret := &corev1.Secret{}
-	if err := m.supervisorClient.Get(ctx, types.NamespacedName{
-		Name:      secretName,
-		Namespace: secretNamespace,
-	}, secret); err != nil {
+	if err := m.supervisorClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: secretNamespace}, secret); err != nil {
 		return nil, fmt.Errorf("failed to get kubeconfig secret %s/%s: %w", secretNamespace, secretName, err)
 	}
-
-	// Extract kubeconfig from secret
 	kubeconfigData, ok := secret.Data["kubeconfig"]
 	if !ok {
 		return nil, fmt.Errorf("secret %s/%s does not contain 'kubeconfig' key", secretNamespace, secretName)
 	}
-
-	// Create REST config from kubeconfig
 	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create REST config from kubeconfig: %w", err)
 	}
 
-	// Create a new Kubernetes client
-	remoteClient, err := client.New(restConfig, client.Options{
-		Scheme: m.scheme,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Kubernetes client: %w", err)
+	// Raise the client-side throttle above client-go's defaults (5 QPS / 10
+	// burst). This controller issues several remote API calls per reconcile
+	// (namespace, PVC, VM, VMI, NAD) across many Machines on a short requeue
+	// interval, so the default limiter queues requests and they can surface as
+	// "client rate limiter Wait returned an error" under load. A value <= 0
+	// leaves the client-go default in place.
+	if qps := viper.GetInt(consts.REMOTE_CLIENT_QPS); qps > 0 {
+		restConfig.QPS = float32(qps)
+	}
+	if burst := viper.GetInt(consts.REMOTE_CLIENT_BURST); burst > 0 {
+		restConfig.Burst = burst
 	}
 
-	// Cache the client
-	m.mu.Lock()
-	m.clients[kubevirtConfigName] = remoteClient
-	m.mu.Unlock()
-
-	logger.Info("Created and cached Kubernetes client for KubevirtConfig", "config", kubevirtConfigName)
-	return remoteClient, nil
+	return restConfig, nil
 }
 
 // ListKubevirtConfigs returns all KubevirtConfig CRDs (cluster-scoped)
@@ -292,50 +319,8 @@ func (m *KubevirtClientManager) HealthCheck(ctx context.Context) map[string]erro
 	return results
 }
 
-// GetRESTConfigForConfig returns a REST config for the specified KubevirtConfig
-// This is useful for creating informers or other clients that need direct REST access
+// GetRESTConfigForConfig returns a REST config for the specified KubevirtConfig.
+// Useful for creating informers or other clients that need direct REST access.
 func (m *KubevirtClientManager) GetRESTConfigForConfig(ctx context.Context, kubevirtConfigName string) (*rest.Config, error) {
-	// Fetch the KubevirtConfig CRD (cluster-scoped, no namespace)
-	kubevirtConfig := &vitistackv1alpha1.KubevirtConfig{}
-	if err := m.supervisorClient.Get(ctx, types.NamespacedName{
-		Name: kubevirtConfigName,
-	}, kubevirtConfig); err != nil {
-		if errors.IsNotFound(err) {
-			return nil, fmt.Errorf("KubevirtConfig %s not found", kubevirtConfigName)
-		}
-		return nil, fmt.Errorf("failed to get KubevirtConfig: %w", err)
-	}
-
-	// Get the kubeconfig secret (secrets are namespaced)
-	secretName := kubevirtConfig.Spec.KubeconfigSecretRef
-	if secretName == "" {
-		return nil, fmt.Errorf("KubevirtConfig %s has no kubeconfigSecretRef", kubevirtConfigName)
-	}
-
-	secretNamespace := kubevirtConfig.Spec.SecretNamespace
-	if secretNamespace == "" {
-		return nil, fmt.Errorf("KubevirtConfig %s has no secretNamespace", kubevirtConfigName)
-	}
-
-	secret := &corev1.Secret{}
-	if err := m.supervisorClient.Get(ctx, types.NamespacedName{
-		Name:      secretName,
-		Namespace: secretNamespace,
-	}, secret); err != nil {
-		return nil, fmt.Errorf("failed to get kubeconfig secret %s/%s: %w", secretNamespace, secretName, err)
-	}
-
-	// Extract kubeconfig from secret
-	kubeconfigData, ok := secret.Data["kubeconfig"]
-	if !ok {
-		return nil, fmt.Errorf("secret %s/%s does not contain 'kubeconfig' key", secretNamespace, secretName)
-	}
-
-	// Create REST config from kubeconfig
-	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create REST config from kubeconfig: %w", err)
-	}
-
-	return restConfig, nil
+	return m.restConfigForKubevirtConfig(ctx, kubevirtConfigName)
 }

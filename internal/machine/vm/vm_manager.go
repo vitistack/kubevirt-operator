@@ -90,6 +90,26 @@ func (m *VMManager) buildVMSpec(ctx context.Context, params *vmBuildParams) *kub
 	runStrategy := kubevirtv1.RunStrategyAlways
 	cpuModel := viper.GetString(consts.CPU_MODEL)
 
+	cpu := &kubevirtv1.CPU{
+		Model:   cpuModel,
+		Cores:   params.coresRequest,
+		Sockets: params.socketsRequest,
+		Threads: params.threadsRequest,
+	}
+	// Workaround for a libvirt host-model regression (KubeVirt >= v1.8.0): the
+	// expanded host-model CPU requires the "ht" (HTT) CPUID flag, which QEMU does
+	// not expose for the guest topology, so check='full' validation fails with
+	// "guest CPU doesn't match specification: extra features: ht" and the VM never
+	// starts. Disabling the feature drops that requirement. Enabled by default,
+	// opt out per cluster via DISABLE_CPU_HT_FEATURE; only host-model exhibits the
+	// regression.
+	if cpuModel == "host-model" && viper.GetBool(consts.DISABLE_CPU_HT_FEATURE) {
+		cpu.Features = append(cpu.Features, kubevirtv1.CPUFeature{
+			Name:   "ht",
+			Policy: "disable",
+		})
+	}
+
 	return &kubevirtv1.VirtualMachine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      params.vmName,
@@ -111,12 +131,7 @@ func (m *VMManager) buildVMSpec(ctx context.Context, params *vmBuildParams) *kub
 				},
 				Spec: kubevirtv1.VirtualMachineInstanceSpec{
 					Domain: kubevirtv1.DomainSpec{
-						CPU: &kubevirtv1.CPU{
-							Model:   cpuModel,
-							Cores:   params.coresRequest,
-							Sockets: params.socketsRequest,
-							Threads: params.threadsRequest,
-						},
+						CPU: cpu,
 						Memory: &kubevirtv1.Memory{
 							Guest: new(resource.MustParse(params.memoryRequest)),
 						},
@@ -165,7 +180,7 @@ func (m *VMManager) CreateVirtualMachine(
 
 	// Add boot source (ISO) if specified
 	if machine.Annotations[AnnotationBootSource] == BootSourceDataVolume && machine.Spec.OS.ImageID != "" {
-		disks, volumes = m.addISOBootSource(disks, volumes, vmName)
+		disks, volumes = m.addISOBootSource(disks, volumes, machine, vmName)
 	}
 
 	// Calculate resource requirements (validates MachineClass from supervisor cluster)

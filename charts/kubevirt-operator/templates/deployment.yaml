@@ -46,6 +46,9 @@ spec:
             - --metrics-secure={{ .Values.metrics.secure }}
             - --leader-elect={{ .Values.leaderElection.enabled }}
           env:
+            # Controller concurrency: max objects reconciled in parallel
+            - name: MAX_CONCURRENT_RECONCILES
+              value: {{ .Values.maxConcurrentReconciles | default 5 | quote }}
             - name: NAMESPACE
               valueFrom:
                 fieldRef:
@@ -53,6 +56,10 @@ spec:
             {{- if .Values.cpuModel }}
             - name: CPU_MODEL
               value: {{ .Values.cpuModel | quote }}
+            {{- end }}
+            {{- if .Values.disableHtCpuFeature }}
+            - name: DISABLE_CPU_HT_FEATURE
+              value: {{ .Values.disableHtCpuFeature | quote }}
             {{- end }}
             {{- if .Values.nadCniVersion }}
             - name: NETWORK_ATTACHMENT_DEFINITION_CNI_VERSION
@@ -72,6 +79,12 @@ spec:
             - name: STORAGE_CLASS_NAME
               value: {{ .Values.storageClassName | quote }}
             {{- end }}
+            {{- if .Values.storageClassNameIso }}
+            - name: STORAGE_CLASS_NAME_ISO
+              value: {{ .Values.storageClassNameIso | quote }}
+            {{- end }}
+            - name: SHARED_ISO_PVC_VOLUME_MODE
+              value: {{ .Values.sharedIsoPvcVolumeMode | quote }}
             {{- if .Values.vmNamePrefix }}
             - name: VM_NAME_PREFIX
               value: {{ .Values.vmNamePrefix | quote }}
