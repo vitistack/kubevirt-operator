@@ -163,23 +163,23 @@ func (m *VMManager) synthesizeNetworkDataFromStaticIP(ctx context.Context, machi
 // renderNetworkConfigV1 emits cloud-init network-config v1 YAML.
 // Spec: https://cloudinit.readthedocs.io/en/latest/reference/network-config-format-v1.html
 func renderNetworkConfigV1(netNs *vitistackv1alpha1.NetworkNamespace, nc *vitistackv1alpha1.NetworkConfiguration) (string, error) {
-	static := netNs.Spec.IPAllocation.Static
-	if static == nil {
-		return "", fmt.Errorf("NetworkNamespace %q has type=static but no static config", netNs.Name)
+	// An explicit spec.ipAllocation.static (manual mode) supplies fallback values.
+	// It is nil for NAM-provisioned static, in which case every field is sourced
+	// from the allocation result that static-ip-operator wrote onto nc.status —
+	// the single source of truth for the assigned address, subnet, gateway and DNS.
+	var static *vitistackv1alpha1.StaticIPAllocationConfig
+	if netNs.Spec.IPAllocation != nil {
+		static = netNs.Spec.IPAllocation.Static
 	}
 
-	netmask, err := cidrToIPv4Netmask(static.IPv4CIDR)
-	if err != nil {
-		return "", err
-	}
-
-	statusIPsByMac := map[string][]string{}
+	// Index the per-interface allocation result by MAC.
+	statusByMac := map[string]*vitistackv1alpha1.NetworkConfigurationInterface{}
 	for i := range nc.Status.NetworkInterfaces {
 		iface := &nc.Status.NetworkInterfaces[i]
 		if iface.MacAddress == "" {
 			continue
 		}
-		statusIPsByMac[strings.ToLower(iface.MacAddress)] = iface.IPv4Addresses
+		statusByMac[strings.ToLower(iface.MacAddress)] = iface
 	}
 
 	if len(nc.Spec.NetworkInterfaces) == 0 {
@@ -190,31 +190,65 @@ func renderNetworkConfigV1(netNs *vitistackv1alpha1.NetworkNamespace, nc *vitist
 	b.WriteString("version: 1\nconfig:\n")
 	for i := range nc.Spec.NetworkInterfaces {
 		spec := &nc.Spec.NetworkInterfaces[i]
-		ips := statusIPsByMac[strings.ToLower(spec.MacAddress)]
-		if len(ips) == 0 {
+		st := statusByMac[strings.ToLower(spec.MacAddress)]
+		if st == nil || len(st.IPv4Addresses) == 0 {
 			return "", ErrWaitingForStaticIP
 		}
-		name := spec.Name
-		if name == "" {
-			name = fmt.Sprintf("eth%d", i)
-		}
-		fmt.Fprintf(&b, "  - type: physical\n    name: %s\n", name)
-		if spec.MacAddress != "" {
-			fmt.Fprintf(&b, "    mac_address: %q\n", strings.ToLower(spec.MacAddress))
-		}
-		b.WriteString("    subnets:\n")
-		fmt.Fprintf(&b, "      - type: static\n        address: %s\n        netmask: %s\n", ips[0], netmask)
-		if static.IPv4Gateway != "" {
-			fmt.Fprintf(&b, "        gateway: %s\n", static.IPv4Gateway)
-		}
-		if len(static.DNS) > 0 {
-			b.WriteString("        dns_nameservers:\n")
-			for _, d := range static.DNS {
-				fmt.Fprintf(&b, "          - %s\n", d)
-			}
+		if err := writeStaticInterface(&b, spec, st, static, i, netNs.Name); err != nil {
+			return "", err
 		}
 	}
 	return b.String(), nil
+}
+
+// writeStaticInterface appends one physical interface with a static subnet to b.
+// It prefers the allocation result (st) for subnet/gateway/dns, falling back to
+// the hand-written static block for any field the result omits.
+func writeStaticInterface(
+	b *strings.Builder,
+	spec, st *vitistackv1alpha1.NetworkConfigurationInterface,
+	static *vitistackv1alpha1.StaticIPAllocationConfig,
+	idx int,
+	nnName string,
+) error {
+	cidr, gateway, dns := st.IPv4Subnet, st.IPv4Gateway, st.DNS
+	if static != nil {
+		if cidr == "" {
+			cidr = static.IPv4CIDR
+		}
+		if gateway == "" {
+			gateway = static.IPv4Gateway
+		}
+		if len(dns) == 0 {
+			dns = static.DNS
+		}
+	}
+
+	netmask, err := cidrToIPv4Netmask(cidr)
+	if err != nil {
+		return fmt.Errorf("NetworkNamespace %q interface %q: %w", nnName, spec.Name, err)
+	}
+
+	name := spec.Name
+	if name == "" {
+		name = fmt.Sprintf("eth%d", idx)
+	}
+	fmt.Fprintf(b, "  - type: physical\n    name: %s\n", name)
+	if spec.MacAddress != "" {
+		fmt.Fprintf(b, "    mac_address: %q\n", strings.ToLower(spec.MacAddress))
+	}
+	b.WriteString("    subnets:\n")
+	fmt.Fprintf(b, "      - type: static\n        address: %s\n        netmask: %s\n", st.IPv4Addresses[0], netmask)
+	if gateway != "" {
+		fmt.Fprintf(b, "        gateway: %s\n", gateway)
+	}
+	if len(dns) > 0 {
+		b.WriteString("        dns_nameservers:\n")
+		for _, d := range dns {
+			fmt.Fprintf(b, "          - %s\n", d)
+		}
+	}
+	return nil
 }
 
 func cidrToIPv4Netmask(cidr string) (string, error) {
