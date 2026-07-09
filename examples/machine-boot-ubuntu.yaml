@@ -16,11 +16,11 @@ spec:
   os:
     family: linux
     distribution: ubuntu
-    version: "24.04"
+    version: "26.04"
     architecture: amd64
     # HTTP URL to the Ubuntu ISO image
     # This will be used to create a DataVolume with CDI
-    imageID: "https://releases.ubuntu.com/24.04.3/ubuntu-24.04.3-live-server-amd64.iso"
+    imageID: "https://releases.ubuntu.com/26.04/ubuntu-26.04-live-server-amd64.iso"
 
   # Define disks - the ISO will be attached as a cdrom
   disks:
