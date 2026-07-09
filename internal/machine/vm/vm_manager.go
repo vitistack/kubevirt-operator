@@ -110,6 +110,8 @@ func (m *VMManager) buildVMSpec(ctx context.Context, params *vmBuildParams) *kub
 		})
 	}
 
+	evictionStrategy := kubevirtv1.EvictionStrategyLiveMigrateIfPossible
+
 	return &kubevirtv1.VirtualMachine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      params.vmName,
@@ -130,6 +132,7 @@ func (m *VMManager) buildVMSpec(ctx context.Context, params *vmBuildParams) *kub
 					},
 				},
 				Spec: kubevirtv1.VirtualMachineInstanceSpec{
+					EvictionStrategy: &evictionStrategy,
 					Domain: kubevirtv1.DomainSpec{
 						CPU: cpu,
 						Memory: &kubevirtv1.Memory{
