@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/viper"
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
+	vitistackv1alpha2 "github.com/vitistack/common/pkg/v1alpha2"
 	"github.com/vitistack/kubevirt-operator/internal/consts"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -67,6 +68,11 @@ func (m *NetworkManager) GetOrCreateNetworkConfiguration(ctx context.Context, ma
 			"namespace", machine.Namespace,
 			"reason", "no NetworkNamespace")
 		return defaultPodNetwork(), nil
+	}
+
+	// Gate on provisioningPhase — wait until the network segment is provisioned
+	if networkNamespace.Status.ProvisioningPhase != "" && networkNamespace.Status.ProvisioningPhase != string(vitistackv1alpha2.ProvisioningPhaseReady) {
+		return nil, fmt.Errorf("NetworkNamespace %s not yet provisioned (phase: %s)", networkNamespace.Name, networkNamespace.Status.ProvisioningPhase)
 	}
 
 	vlanId := networkNamespace.Status.VlanID
@@ -271,8 +277,17 @@ func (m *NetworkManager) createNetworkAttachmentDefinition(ctx context.Context, 
 		},
 	}
 
-	// Create on remote cluster
+	// Create on remote cluster. A concurrent reconcile (another Machine sharing
+	// this VLAN's NAD) may have created it first — AlreadyExists is the desired
+	// state, so treat it as success rather than failing the whole VM reconcile.
 	if err := remoteClient.Create(ctx, nad); err != nil {
+		if errors.IsAlreadyExists(err) {
+			logger.Info("NetworkAttachmentDefinition already created concurrently, treating as success",
+				"name", name,
+				"namespace", namespace,
+				"vlanId", vlanId)
+			return nad, nil
+		}
 		return nil, fmt.Errorf("failed to create NetworkAttachmentDefinition on remote cluster: %w", err)
 	}
 
