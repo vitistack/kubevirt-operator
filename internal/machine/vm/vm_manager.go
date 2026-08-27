@@ -147,9 +147,8 @@ func (m *VMManager) buildVMSpec(ctx context.Context, params *vmBuildParams) *kub
 							},
 						},
 						Devices: kubevirtv1.Devices{
-							Disks:                      params.disks,
-							AutoattachPodInterface:     new(false),
-							NetworkInterfaceMultiQueue: new(true),
+							Disks:                  params.disks,
+							AutoattachPodInterface: new(false),
 							Interfaces: []kubevirtv1.Interface{
 								{
 									Name:  params.networkConfiguration.Name,
