@@ -294,12 +294,12 @@ func (r *MachineReconciler) fetchAndInitMachine(ctx context.Context, req ctrl.Re
 			if errors.IsConflict(err) {
 				// Conflict error means the resource was modified, requeue to retry
 				logger.V(1).Info("Conflict updating Machine finalizer, requeuing")
-				return machine, ctrl.Result{Requeue: true}, true, nil
+				return machine, ctrl.Result{RequeueAfter: RequeueDelay}, true, nil
 			}
 			logger.Error(err, "Failed to add finalizer to Machine")
 			return machine, ctrl.Result{}, true, err
 		}
-		return machine, ctrl.Result{Requeue: true}, true, nil
+		return machine, ctrl.Result{RequeueAfter: RequeueDelay}, true, nil
 	}
 	return machine, ctrl.Result{}, false, nil
 }
@@ -509,7 +509,7 @@ func (r *MachineReconciler) cleanupRemoteResources(ctx context.Context, machine 
 	if vmStillExists {
 		logger.Info("VM still exists - requeuing (PVCs cleaned up, will retry for NAD)",
 			"virtualmachine", vmKey.Name)
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: RequeueDelay}, nil
 	}
 
 	// The VM is gone, so its reference no longer keeps any shared boot-ISO volume
