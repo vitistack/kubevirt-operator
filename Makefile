@@ -91,7 +91,7 @@ test-setup: manifests generate fmt vet setup-envtest ## Set up the environment f
 
 .PHONY: test
 test: test-setup ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile coverage.out
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST_RESOLVE))" go test $$(go list ./... | grep -v /e2e) -coverprofile coverage.out
 
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
@@ -315,6 +315,12 @@ CONTROLLER_TOOLS_VERSION ?= v0.19.0
 ENVTEST_VERSION ?= $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller-runtime | awk -F'[v.]' '{printf "release-%d.%d", $$2, $$3}')
 #ENVTEST_K8S_VERSION is the version of Kubernetes to use for setting up ENVTEST binaries (i.e. 1.31)
 ENVTEST_K8S_VERSION ?= $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
+# envtest binary releases lag behind k8s.io/api, so a freshly bumped k8s.io/api can
+# point at a minor with no published binaries. Fall back to the newest release below
+# the next minor instead of failing the whole test target.
+ENVTEST_K8S_VERSION_NEXT = $(shell echo "$(ENVTEST_K8S_VERSION)" | awk -F. '{printf "1.%d", $$2+1}')
+ENVTEST_USE = $(ENVTEST) use --bin-dir $(LOCALBIN) -p path
+ENVTEST_RESOLVE = { $(ENVTEST_USE) $(ENVTEST_K8S_VERSION) 2>/dev/null || $(ENVTEST_USE) '<$(ENVTEST_K8S_VERSION_NEXT)'; }
 GOLANGCI_LINT_VERSION ?= latest
 GOSEC_VERSION ?= latest
 # Dynamically derived versions (can be overridden)
@@ -352,11 +358,13 @@ $(CONTROLLER_GEN): $(LOCALBIN)
 
 .PHONY: setup-envtest
 setup-envtest: envtest ## Download the binaries required for ENVTEST in the local bin directory.
-	@echo -e "Setting up envtest binaries for Kubernetes version $(ENVTEST_K8S_VERSION)..."
-	@$(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path || { \
-		echo "Error: Failed to set up envtest binaries for version $(ENVTEST_K8S_VERSION)."; \
+	@echo "Setting up envtest binaries for Kubernetes version $(ENVTEST_K8S_VERSION)..."
+	@assets="$$($(ENVTEST_RESOLVE))"; \
+	if [ -z "$$assets" ]; then \
+		echo "Error: Failed to set up envtest binaries for version $(ENVTEST_K8S_VERSION) or any earlier release."; \
 		exit 1; \
-	}
+	fi; \
+	echo "Using envtest binaries at $$assets"
 
 .PHONY: envtest
 envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
