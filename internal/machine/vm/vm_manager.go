@@ -18,14 +18,17 @@ package vm
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/spf13/viper"
+	"github.com/vitistack/common/pkg/loggers/vlog"
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/internal/consts"
 	"github.com/vitistack/kubevirt-operator/internal/machine/network"
 	"github.com/vitistack/kubevirt-operator/internal/machine/status"
 	"github.com/vitistack/kubevirt-operator/internal/machine/storage"
 	"github.com/vitistack/kubevirt-operator/pkg/macaddress"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -171,10 +174,7 @@ func (m *VMManager) buildVMSpec(ctx context.Context, params *vmBuildParams) *kub
 }
 
 // CreateVirtualMachine creates a KubeVirt VirtualMachine with the specified disks and volumes
-func (m *VMManager) CreateVirtualMachine(
-	ctx context.Context,
-	machine *vitistackv1alpha1.Machine, vmName string,
-	pvcNames []string) (*kubevirtv1.VirtualMachine, error) {
+func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string, pvcNames []string) (*kubevirtv1.VirtualMachine, error) {
 	logger := log.FromContext(ctx)
 
 	// Build disks and volumes from the disk specs
@@ -243,6 +243,11 @@ func (m *VMManager) CreateVirtualMachine(
 	machine.Status.Phase = vitistackv1alpha1.MachinePhaseCreating
 	machine.Status.State = consts.MachineStatePending
 
+	vm, err = addAntiAffinityRules(machine, vm)
+	if err != nil {
+		vlog.Errorf("add anti affinity rules: %v", err.Error())
+	}
+
 	// Note: We do NOT set Machine as the owner reference for the VirtualMachine because
 	// they exist in different clusters (Machine on supervisor, VM on remote KubeVirt cluster).
 	// Cross-cluster owner references are not supported in Kubernetes.
@@ -252,5 +257,43 @@ func (m *VMManager) CreateVirtualMachine(
 	}
 
 	logger.Info("Successfully created VirtualMachine", "virtualmachine", vm.Name, "disks", len(disks), "volumes", len(volumes))
+	return vm, nil
+}
+
+func addAntiAffinityRules(m *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine) (*kubevirtv1.VirtualMachine, error) {
+	if m.Labels[vitistackv1alpha1.ClusterIdAnnotation] == "" || m.Labels[vitistackv1alpha1.NodeRoleAnnotation] == "" {
+		return &kubevirtv1.VirtualMachine{}, fmt.Errorf("machine is missing clusterid and/or node role annotations")
+	}
+
+	clusterID := m.Labels[vitistackv1alpha1.ClusterIdAnnotation]
+	noderole := m.Labels[vitistackv1alpha1.NodeRoleAnnotation]
+
+	// copy labels from Machine
+	for key, value := range m.Labels {
+		if _, found := vm.Spec.Template.ObjectMeta.Labels[key]; !found {
+			// TODO: ensure that Template.ObjectMeta.Labels exist!
+			vm.Spec.Template.ObjectMeta.Labels[key] = value
+		}
+	}
+
+	spreadConstraints := []corev1.TopologySpreadConstraint{
+		{
+			MaxSkew:            1,
+			TopologyKey:        corev1.LabelHostname,
+			WhenUnsatisfiable:  corev1.DoNotSchedule, // TODO: set ScheduleAnyway for workers?
+			MinDomains:         new(int32),
+			NodeAffinityPolicy: new(corev1.NodeInclusionPolicyHonor),
+			NodeTaintsPolicy:   new(corev1.NodeInclusionPolicyHonor),
+			LabelSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					vitistackv1alpha1.ClusterIdAnnotation: clusterID,
+					vitistackv1alpha1.NodeRoleAnnotation:  noderole,
+				},
+			},
+		},
+	}
+
+	vm.Spec.Template.Spec.TopologySpreadConstraints = spreadConstraints
+
 	return vm, nil
 }

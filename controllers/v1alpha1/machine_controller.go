@@ -102,6 +102,8 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return result, err
 	}
 
+	// TODO: move check for clusterid and noderule annotation - if tags: cluster is set
+
 	// Get the remote KubeVirt client for this machine
 	remoteClient, kubevirtConfigName, needsAnnotationUpdate, err := r.KubevirtClientMgr.GetOrCreateClientFromMachine(ctx, machine)
 	if err != nil {
@@ -301,6 +303,9 @@ func (r *MachineReconciler) fetchAndInitMachine(ctx context.Context, req ctrl.Re
 		}
 		return machine, ctrl.Result{RequeueAfter: RequeueDelay}, true, nil
 	}
+
+	// TODO: ensure machine.Spec exists?
+
 	return machine, ctrl.Result{}, false, nil
 }
 
