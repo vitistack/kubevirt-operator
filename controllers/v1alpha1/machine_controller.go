@@ -102,7 +102,13 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return result, err
 	}
 
-	// TODO: move check for clusterid and noderule annotation - if tags: cluster is set
+	// if the machine is part of a cluster, we need clusterID and the machine's role in the cluster to be set
+	if machine.Spec.Tags["cluster"] != "" {
+		err := ensureAnnotationForClusters(machine)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 
 	// Get the remote KubeVirt client for this machine
 	remoteClient, kubevirtConfigName, needsAnnotationUpdate, err := r.KubevirtClientMgr.GetOrCreateClientFromMachine(ctx, machine)
@@ -806,4 +812,11 @@ func (r *MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrent}).
 		Named("kubevirt-machine").
 		Complete(r)
+}
+
+func ensureAnnotationForClusters(m *vitistackv1alpha1.Machine) error {
+	if m.Labels[vitistackv1alpha1.ClusterIdAnnotation] == "" || m.Labels[vitistackv1alpha1.NodeRoleAnnotation] == "" {
+		return fmt.Errorf("machine is missing clusterid and/or node role annotations")
+	}
+	return nil
 }
