@@ -243,7 +243,7 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 	machine.Status.Phase = vitistackv1alpha1.MachinePhaseCreating
 	machine.Status.State = consts.MachineStatePending
 
-	vm, err = addAntiAffinityRules(machine, vm)
+	vm, err = addSpreadConstraints(machine, vm)
 	if err != nil {
 		vlog.Errorf("add anti affinity rules: %v", err.Error())
 	}
@@ -260,7 +260,7 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 	return vm, nil
 }
 
-func addAntiAffinityRules(m *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine) (*kubevirtv1.VirtualMachine, error) {
+func addSpreadConstraints(m *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine) (*kubevirtv1.VirtualMachine, error) {
 	if m.Labels[vitistackv1alpha1.ClusterIdAnnotation] == "" || m.Labels[vitistackv1alpha1.NodeRoleAnnotation] == "" {
 		return &kubevirtv1.VirtualMachine{}, fmt.Errorf("machine is missing clusterid and/or node role annotations")
 	}
@@ -268,20 +268,21 @@ func addAntiAffinityRules(m *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMa
 	clusterID := m.Labels[vitistackv1alpha1.ClusterIdAnnotation]
 	noderole := m.Labels[vitistackv1alpha1.NodeRoleAnnotation]
 
-	// copy labels from Machine
+	// copy labels from Machine to VirtualMachine, these are used to select VMs using LabelSelector and go in the ObjectMeta.
 	for key, value := range m.Labels {
-		if _, found := vm.Spec.Template.ObjectMeta.Labels[key]; !found {
-			// TODO: ensure that Template.ObjectMeta.Labels exist!
-			vm.Spec.Template.ObjectMeta.Labels[key] = value
+		if _, found := vm.ObjectMeta.Labels[key]; !found {
+			vm.ObjectMeta.Labels[key] = value
 		}
 	}
 
+	// Spread VMs of this cluster+role across nodes so one node failure can't
+	// take out multiple instances of the same role.
 	spreadConstraints := []corev1.TopologySpreadConstraint{
 		{
 			MaxSkew:            1,
 			TopologyKey:        corev1.LabelHostname,
 			WhenUnsatisfiable:  corev1.DoNotSchedule, // TODO: set ScheduleAnyway for workers?
-			MinDomains:         new(int32),
+			MinDomains:         new(int32(1)),
 			NodeAffinityPolicy: new(corev1.NodeInclusionPolicyHonor),
 			NodeTaintsPolicy:   new(corev1.NodeInclusionPolicyHonor),
 			LabelSelector: &metav1.LabelSelector{

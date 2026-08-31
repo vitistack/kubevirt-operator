@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"context"
 	"testing"
 
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
@@ -22,28 +23,41 @@ func TestAddAffinityRules(t *testing.T) {
 		},
 	}
 
-	// TODO: use buildVMSpec()
+	var vmm *VMManager
+	p := &vmBuildParams{
+		vmName:               "testVM",
+		machine:              machine,
+		disks:                []kubevirtv1.Disk{{Name: "asdf", DiskDevice: kubevirtv1.DiskDevice{}}},
+		volumes:              []kubevirtv1.Volume{{Name: "asdf", VolumeSource: kubevirtv1.VolumeSource{}}},
+		memoryRequest:        "1024",
+		coresRequest:         1,
+		socketsRequest:       2,
+		threadsRequest:       2,
+		networkConfiguration: &kubevirtv1.Network{},
+		networkBootOrder:     new(uint(1)),
+		macAddress:           "asdf",
+	}
 
-	virtualMachine := &kubevirtv1.VirtualMachine{}
+	vm := vmm.buildVMSpec(context.Background(), p)
 
-	vm, err := addAntiAffinityRules(machine, virtualMachine)
+	vm, err := addSpreadConstraints(machine, vm)
 	if err != nil {
 		t.Fatalf("unexpected error: %v ", err)
 	}
 
 	gotClusterID, found := vm.Labels[vitistackv1alpha1.ClusterIdAnnotation]
 	if !found {
-		t.Errorf("cluster id annotation missing")
+		t.Fatalf("cluster id annotation missing: %+v", vm.ObjectMeta.Labels)
 	}
 	if gotClusterID != wantClusterID {
-		t.Fatalf("got %q, want %q ", gotClusterID, wantClusterID)
+		t.Errorf("got %q, want %q ", gotClusterID, wantClusterID)
 	}
 
 	gotNodeRole, found := vm.Labels[vitistackv1alpha1.NodeRoleAnnotation]
 	if !found {
-		t.Errorf("node role annotation missing")
+		t.Fatalf("node role annotation missing")
 	}
 	if gotNodeRole != wantNodeRole {
-		t.Fatalf("got %q, want %q ", gotNodeRole, wantNodeRole)
+		t.Errorf("got %q, want %q ", gotNodeRole, wantNodeRole)
 	}
 }
