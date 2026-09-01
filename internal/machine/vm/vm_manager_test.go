@@ -54,7 +54,8 @@ func TestAddSpreadConstraints(t *testing.T) {
 
 			vm := vmm.buildVMSpec(context.Background(), p)
 
-			vm = addSpreadConstraints(machine, vm)
+			// vm = addSpreadConstraints(machine, vm)
+			vm = addAntiAffinity(machine, vm)
 
 			gotClusterID, found := vm.Spec.Template.ObjectMeta.Labels[vitistackv1alpha1.ClusterIdAnnotation]
 			if !found {

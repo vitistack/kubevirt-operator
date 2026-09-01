@@ -290,3 +290,34 @@ func addSpreadConstraints(m *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMa
 
 	return vm
 }
+
+func addAntiAffinity(m *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine) *kubevirtv1.VirtualMachine {
+	clusterID := m.Labels[vitistackv1alpha1.ClusterIdAnnotation]
+	noderole := m.Labels[vitistackv1alpha1.NodeRoleAnnotation]
+
+	// copy labels from Machine to VirtualMachine, these are used to select VMs using LabelSelector and go in the ObjectMeta.
+	for key, value := range m.Labels {
+		if _, found := vm.Spec.Template.ObjectMeta.Labels[key]; !found {
+			vm.Spec.Template.ObjectMeta.Labels[key] = value
+		}
+	}
+
+	affinity := &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{
+		PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{{
+			Weight: 100,
+			PodAffinityTerm: corev1.PodAffinityTerm{
+				LabelSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						vitistackv1alpha1.ClusterIdAnnotation: clusterID,
+						vitistackv1alpha1.NodeRoleAnnotation:  noderole,
+					},
+				},
+				TopologyKey: corev1.LabelHostname,
+			},
+		}},
+	}}
+
+	vm.Spec.Template.Spec.Affinity = affinity
+
+	return vm
+}
