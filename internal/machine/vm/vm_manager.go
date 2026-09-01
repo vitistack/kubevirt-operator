@@ -242,7 +242,8 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 	machine.Status.Phase = vitistackv1alpha1.MachinePhaseCreating
 	machine.Status.State = consts.MachineStatePending
 
-	vm = addSpreadConstraints(machine, vm)
+	//vm = addSpreadConstraints(machine, vm)
+	vm = addAntiAffinity(machine, vm)
 
 	// Note: We do NOT set Machine as the owner reference for the VirtualMachine because
 	// they exist in different clusters (Machine on supervisor, VM on remote KubeVirt cluster).
