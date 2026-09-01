@@ -56,15 +56,15 @@ func TestAddSpreadConstraints(t *testing.T) {
 
 			vm = addSpreadConstraints(machine, vm)
 
-			gotClusterID, found := vm.Labels[vitistackv1alpha1.ClusterIdAnnotation]
+			gotClusterID, found := vm.Spec.Template.ObjectMeta.Labels[vitistackv1alpha1.ClusterIdAnnotation]
 			if !found {
-				t.Fatalf("cluster id annotation missing: %+v", vm.Labels)
+				t.Fatalf("cluster id annotation missing: %+v", vm.Spec.Template.ObjectMeta.Labels)
 			}
 			if gotClusterID != wantClusterID {
 				t.Errorf("got %q, want %q ", gotClusterID, wantClusterID)
 			}
 
-			gotNodeRole, found := vm.Labels[vitistackv1alpha1.NodeRoleAnnotation]
+			gotNodeRole, found := vm.Spec.Template.ObjectMeta.Labels[vitistackv1alpha1.NodeRoleAnnotation]
 			if !found {
 				t.Fatalf("node role annotation missing")
 			}

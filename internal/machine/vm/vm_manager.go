@@ -262,8 +262,8 @@ func addSpreadConstraints(m *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMa
 
 	// copy labels from Machine to VirtualMachine, these are used to select VMs using LabelSelector and go in the ObjectMeta.
 	for key, value := range m.Labels {
-		if _, found := vm.Labels[key]; !found {
-			vm.Labels[key] = value
+		if _, found := vm.Spec.Template.ObjectMeta.Labels[key]; !found {
+			vm.Spec.Template.ObjectMeta.Labels[key] = value
 		}
 	}
 
