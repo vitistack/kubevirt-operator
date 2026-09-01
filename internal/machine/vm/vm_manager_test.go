@@ -27,15 +27,15 @@ func TestAddAffinityRules(t *testing.T) {
 	p := &vmBuildParams{
 		vmName:               "testVM",
 		machine:              machine,
-		disks:                []kubevirtv1.Disk{{Name: "asdf", DiskDevice: kubevirtv1.DiskDevice{}}},
-		volumes:              []kubevirtv1.Volume{{Name: "asdf", VolumeSource: kubevirtv1.VolumeSource{}}},
+		disks:                []kubevirtv1.Disk{{Name: "testDisk", DiskDevice: kubevirtv1.DiskDevice{}}},
+		volumes:              []kubevirtv1.Volume{{Name: "testVol", VolumeSource: kubevirtv1.VolumeSource{}}},
 		memoryRequest:        "1024",
 		coresRequest:         1,
 		socketsRequest:       2,
 		threadsRequest:       2,
 		networkConfiguration: &kubevirtv1.Network{},
 		networkBootOrder:     new(uint(1)),
-		macAddress:           "asdf",
+		macAddress:           "test:mac",
 	}
 
 	vm := vmm.buildVMSpec(context.Background(), p)
@@ -47,7 +47,7 @@ func TestAddAffinityRules(t *testing.T) {
 
 	gotClusterID, found := vm.Labels[vitistackv1alpha1.ClusterIdAnnotation]
 	if !found {
-		t.Fatalf("cluster id annotation missing: %+v", vm.ObjectMeta.Labels)
+		t.Fatalf("cluster id annotation missing: %+v", vm.Labels)
 	}
 	if gotClusterID != wantClusterID {
 		t.Errorf("got %q, want %q ", gotClusterID, wantClusterID)
