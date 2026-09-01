@@ -106,6 +106,7 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if machine.Spec.Tags["cluster"] != "" {
 		err := ensureAnnotationForClusters(machine)
 		if err != nil {
+			logger.Error(err, "ensure annotation for cluster machines")
 			return ctrl.Result{}, err
 		}
 	}
