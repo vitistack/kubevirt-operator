@@ -148,6 +148,7 @@ func (m *VMManager) buildVMSpec(ctx context.Context, params *vmBuildParams) *kub
 							},
 						},
 						Devices: kubevirtv1.Devices{
+							Rng:                    &kubevirtv1.Rng{},
 							Disks:                  params.disks,
 							AutoattachPodInterface: new(false),
 							Interfaces: []kubevirtv1.Interface{
