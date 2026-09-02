@@ -242,8 +242,10 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 	machine.Status.Phase = vitistackv1alpha1.MachinePhaseCreating
 	machine.Status.State = consts.MachineStatePending
 
-	//vm = addSpreadConstraints(machine, vm)
-	vm = addAntiAffinity(machine, vm)
+	// TODO: make configurable via values.yaml
+	// vm = addAntiAffinity(machine, vm)
+	vm = addSpreadConstraints(machine, vm)
+	vm = addDeschedulerAnnotation(vm)
 
 	// Note: We do NOT set Machine as the owner reference for the VirtualMachine because
 	// they exist in different clusters (Machine on supervisor, VM on remote KubeVirt cluster).
@@ -320,5 +322,10 @@ func addAntiAffinity(m *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine
 
 	vm.Spec.Template.Spec.Affinity = affinity
 
+	return vm
+}
+
+func addDeschedulerAnnotation(vm *kubevirtv1.VirtualMachine) *kubevirtv1.VirtualMachine {
+	vm.Spec.Template.ObjectMeta.Annotations["descheduler.alpha.kubernetes.io/evict"] = "true"
 	return vm
 }
