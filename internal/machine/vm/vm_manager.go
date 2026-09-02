@@ -276,7 +276,7 @@ func addSpreadConstraints(m *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMa
 		{
 			MaxSkew:            1,
 			TopologyKey:        corev1.LabelHostname,
-			WhenUnsatisfiable:  corev1.DoNotSchedule,
+			WhenUnsatisfiable:  corev1.ScheduleAnyway,
 			MinDomains:         new(int32(1)),
 			NodeAffinityPolicy: new(corev1.NodeInclusionPolicyHonor),
 			NodeTaintsPolicy:   new(corev1.NodeInclusionPolicyHonor),
