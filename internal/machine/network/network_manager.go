@@ -47,7 +47,7 @@ type NetworkAttachmentConfigPlugin struct {
 	Bridge        string         `json:"bridge,omitempty"`
 	IPAM          map[string]any `json:"ipam,omitempty"`
 	VLAN          int            `json:"vlan,omitempty"`
-	MACSpoofCheck bool           `json:"macspoofchk,omitempty"`
+	MACSpoofCheck bool           `json:"macspoofchk"`
 }
 
 func (m *NetworkManager) GetOrCreateNetworkConfiguration(ctx context.Context, machine *vitistackv1alpha1.Machine, remoteClient client.Client) (*kubevirtv1.Network, error) {
