@@ -44,6 +44,8 @@ func Init() {
 	viper.SetDefault(consts.MAX_CONCURRENT_RECONCILES, 5)
 	viper.SetDefault(consts.REMOTE_CLIENT_QPS, 50)    // client-go default is 5; raise for per-reconcile call volume
 	viper.SetDefault(consts.REMOTE_CLIENT_BURST, 100) // client-go default is 10
+	viper.SetDefault(consts.PLACEMENT_POLICY, "spreadconstraint")
+	viper.SetDefault(consts.DESCHEDULER_ANNOTATION, false)
 
 	dotenv.LoadDotEnv()
 

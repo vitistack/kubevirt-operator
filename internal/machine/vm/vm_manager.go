@@ -40,6 +40,11 @@ import (
 // originating Machine resource by name.
 const LabelSourceMachine = "vitistack.io/source-machine"
 
+const (
+	PolicySpreadContraints = "spreadconstraint"
+	PolicyAntiAffinity     = "antiaffinity"
+)
+
 // VMManager handles VirtualMachine-related operations
 type VMManager struct {
 	supervisorClient client.Client // Client for supervisor cluster (Machine CRDs)
@@ -243,9 +248,18 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 	machine.Status.State = consts.MachineStatePending
 
 	// TODO: make configurable via values.yaml
-	// vm = addAntiAffinity(machine, vm)
-	vm = addSpreadConstraints(machine, vm)
-	vm = addDeschedulerAnnotation(vm)
+	switch viper.GetString(consts.PLACEMENT_POLICY) {
+	case PolicyAntiAffinity:
+		vm = addAntiAffinity(machine, vm)
+	case PolicySpreadContraints:
+		vm = addSpreadConstraints(machine, vm)
+	default:
+
+	}
+
+	if viper.GetBool(consts.DESCHEDULER_ANNOTATION) {
+		vm = addDeschedulerAnnotation(vm)
+	}
 
 	// Note: We do NOT set Machine as the owner reference for the VirtualMachine because
 	// they exist in different clusters (Machine on supervisor, VM on remote KubeVirt cluster).
