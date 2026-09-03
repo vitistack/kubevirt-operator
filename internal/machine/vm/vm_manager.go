@@ -26,6 +26,7 @@ import (
 	"github.com/vitistack/kubevirt-operator/internal/machine/status"
 	"github.com/vitistack/kubevirt-operator/internal/machine/storage"
 	"github.com/vitistack/kubevirt-operator/pkg/macaddress"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -38,6 +39,11 @@ import (
 // DataVolumeTemplates, NetworkConfigurations, ...) pointing back to the
 // originating Machine resource by name.
 const LabelSourceMachine = "vitistack.io/source-machine"
+
+const (
+	PolicySpreadContraints = "spreadconstraint"
+	PolicyAntiAffinity     = "antiaffinity"
+)
 
 // VMManager handles VirtualMachine-related operations
 type VMManager struct {
@@ -147,6 +153,7 @@ func (m *VMManager) buildVMSpec(ctx context.Context, params *vmBuildParams) *kub
 							},
 						},
 						Devices: kubevirtv1.Devices{
+							Rng:                    &kubevirtv1.Rng{},
 							Disks:                  params.disks,
 							AutoattachPodInterface: new(false),
 							Interfaces: []kubevirtv1.Interface{
@@ -171,10 +178,7 @@ func (m *VMManager) buildVMSpec(ctx context.Context, params *vmBuildParams) *kub
 }
 
 // CreateVirtualMachine creates a KubeVirt VirtualMachine with the specified disks and volumes
-func (m *VMManager) CreateVirtualMachine(
-	ctx context.Context,
-	machine *vitistackv1alpha1.Machine, vmName string,
-	pvcNames []string) (*kubevirtv1.VirtualMachine, error) {
+func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistackv1alpha1.Machine, vmName string, pvcNames []string) (*kubevirtv1.VirtualMachine, error) {
 	logger := log.FromContext(ctx)
 
 	// Build disks and volumes from the disk specs
@@ -243,6 +247,20 @@ func (m *VMManager) CreateVirtualMachine(
 	machine.Status.Phase = vitistackv1alpha1.MachinePhaseCreating
 	machine.Status.State = consts.MachineStatePending
 
+	// TODO: make configurable via values.yaml
+	switch viper.GetString(consts.PLACEMENT_POLICY) {
+	case PolicyAntiAffinity:
+		vm = addAntiAffinity(machine, vm)
+	case PolicySpreadContraints:
+		vm = addSpreadConstraints(machine, vm)
+	default:
+
+	}
+
+	if viper.GetBool(consts.DESCHEDULER_ANNOTATION) {
+		vm = addDeschedulerAnnotation(vm)
+	}
+
 	// Note: We do NOT set Machine as the owner reference for the VirtualMachine because
 	// they exist in different clusters (Machine on supervisor, VM on remote KubeVirt cluster).
 	// Cross-cluster owner references are not supported in Kubernetes.
@@ -253,4 +271,77 @@ func (m *VMManager) CreateVirtualMachine(
 
 	logger.Info("Successfully created VirtualMachine", "virtualmachine", vm.Name, "disks", len(disks), "volumes", len(volumes))
 	return vm, nil
+}
+
+func addSpreadConstraints(m *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine) *kubevirtv1.VirtualMachine {
+	clusterID := m.Labels[vitistackv1alpha1.ClusterIdAnnotation]
+	noderole := m.Labels[vitistackv1alpha1.NodeRoleAnnotation]
+
+	// copy labels from Machine to VirtualMachine, these are used to select VMs using LabelSelector and go in the ObjectMeta.
+	for key, value := range m.Labels {
+		if _, found := vm.Spec.Template.ObjectMeta.Labels[key]; !found {
+			vm.Spec.Template.ObjectMeta.Labels[key] = value
+		}
+	}
+
+	// Spread VMs of this cluster+role across nodes so one node failure can't
+	// take out multiple instances of the same role.
+	spreadConstraints := []corev1.TopologySpreadConstraint{
+		{
+			MaxSkew:           1,
+			TopologyKey:       corev1.LabelHostname,
+			WhenUnsatisfiable: corev1.ScheduleAnyway,
+			//	MinDomains:         new(int32(1)),
+			NodeAffinityPolicy: new(corev1.NodeInclusionPolicyHonor),
+			NodeTaintsPolicy:   new(corev1.NodeInclusionPolicyHonor),
+			LabelSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					vitistackv1alpha1.ClusterIdAnnotation: clusterID,
+					vitistackv1alpha1.NodeRoleAnnotation:  noderole,
+				},
+			},
+		},
+	}
+
+	vm.Spec.Template.Spec.TopologySpreadConstraints = spreadConstraints
+
+	return vm
+}
+
+func addAntiAffinity(m *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine) *kubevirtv1.VirtualMachine {
+	clusterID := m.Labels[vitistackv1alpha1.ClusterIdAnnotation]
+	noderole := m.Labels[vitistackv1alpha1.NodeRoleAnnotation]
+
+	// copy labels from Machine to VirtualMachine, these are used to select VMs using LabelSelector and go in the ObjectMeta.
+	for key, value := range m.Labels {
+		if _, found := vm.Spec.Template.ObjectMeta.Labels[key]; !found {
+			vm.Spec.Template.ObjectMeta.Labels[key] = value
+		}
+	}
+
+	affinity := &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{
+		PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{{
+			Weight: 100,
+			PodAffinityTerm: corev1.PodAffinityTerm{
+				LabelSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						vitistackv1alpha1.ClusterIdAnnotation: clusterID,
+						vitistackv1alpha1.NodeRoleAnnotation:  noderole,
+					},
+				},
+				TopologyKey: corev1.LabelHostname,
+			},
+		}},
+	}}
+
+	vm.Spec.Template.Spec.Affinity = affinity
+
+	return vm
+}
+
+func addDeschedulerAnnotation(vm *kubevirtv1.VirtualMachine) *kubevirtv1.VirtualMachine {
+	a := make(map[string]string)
+	a["descheduler.alpha.kubernetes.io/evict"] = "true"
+	vm.Spec.Template.ObjectMeta.Annotations = a
+	return vm
 }
