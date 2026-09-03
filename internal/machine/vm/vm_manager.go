@@ -288,10 +288,10 @@ func addSpreadConstraints(m *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMa
 	// take out multiple instances of the same role.
 	spreadConstraints := []corev1.TopologySpreadConstraint{
 		{
-			MaxSkew:            1,
-			TopologyKey:        corev1.LabelHostname,
-			WhenUnsatisfiable:  corev1.ScheduleAnyway,
-			MinDomains:         new(int32(1)),
+			MaxSkew:           1,
+			TopologyKey:       corev1.LabelHostname,
+			WhenUnsatisfiable: corev1.ScheduleAnyway,
+			//	MinDomains:         new(int32(1)),
 			NodeAffinityPolicy: new(corev1.NodeInclusionPolicyHonor),
 			NodeTaintsPolicy:   new(corev1.NodeInclusionPolicyHonor),
 			LabelSelector: &metav1.LabelSelector{
@@ -340,6 +340,8 @@ func addAntiAffinity(m *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine
 }
 
 func addDeschedulerAnnotation(vm *kubevirtv1.VirtualMachine) *kubevirtv1.VirtualMachine {
-	vm.Spec.Template.ObjectMeta.Annotations["descheduler.alpha.kubernetes.io/evict"] = "true"
+	a := make(map[string]string)
+	a["descheduler.alpha.kubernetes.io/evict"] = "true"
+	vm.Spec.Template.ObjectMeta.Annotations = a
 	return vm
 }
