@@ -288,16 +288,17 @@ func addSpreadConstraints(m *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMa
 	// take out multiple instances of the same role.
 	spreadConstraints := []corev1.TopologySpreadConstraint{
 		{
-			MaxSkew:           1,
-			TopologyKey:       corev1.LabelHostname,
+			MaxSkew:     1,
+			TopologyKey: corev1.LabelHostname, // what should the pods be spread across
+			// WhenUnsatisfiable: corev2.DoNotSchedule,
 			WhenUnsatisfiable: corev1.ScheduleAnyway,
 			//	MinDomains:         new(int32(1)),
 			NodeAffinityPolicy: new(corev1.NodeInclusionPolicyHonor),
 			NodeTaintsPolicy:   new(corev1.NodeInclusionPolicyHonor),
 			LabelSelector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					vitistackv1alpha1.ClusterIdAnnotation: clusterID,
-					vitistackv1alpha1.NodeRoleAnnotation:  noderole,
+					vitistackv1alpha1.ClusterIdAnnotation: clusterID, // pods from the same tenant cluster
+					vitistackv1alpha1.NodeRoleAnnotation:  noderole,  // pods with the same role in the cluster
 				},
 			},
 		},
@@ -321,15 +322,15 @@ func addAntiAffinity(m *vitistackv1alpha1.Machine, vm *kubevirtv1.VirtualMachine
 
 	affinity := &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{
 		PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{{
-			Weight: 100,
+			Weight: 100, // how important is this rule in relation to others
 			PodAffinityTerm: corev1.PodAffinityTerm{
 				LabelSelector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{
-						vitistackv1alpha1.ClusterIdAnnotation: clusterID,
-						vitistackv1alpha1.NodeRoleAnnotation:  noderole,
+						vitistackv1alpha1.ClusterIdAnnotation: clusterID, // pods from the same tenant cluster
+						vitistackv1alpha1.NodeRoleAnnotation:  noderole,  // pods with the same role in the cluster
 					},
 				},
-				TopologyKey: corev1.LabelHostname,
+				TopologyKey: corev1.LabelHostname, // what should the pods shy away from eachother on
 			},
 		}},
 	}}
