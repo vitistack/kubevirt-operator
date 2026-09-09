@@ -216,3 +216,9 @@ healthProbe:
 rbac:
   # Create ClusterRole and ClusterRoleBinding
   create: true
+
+# Predefined placement poicies are "spreadconstraint" or "antiaffinity"
+placementPolicy: "spreadconstraint"
+
+# Descheduler: set "evict" annotation on pods
+deschedulerAnnotation: true
