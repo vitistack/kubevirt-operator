@@ -43,10 +43,11 @@ type NetworkAttachmentConfig struct {
 
 // NetworkAttachmentConfigPlugin represents a plugin in the CNI configuration
 type NetworkAttachmentConfigPlugin struct {
-	Type   string         `json:"type"`
-	Bridge string         `json:"bridge,omitempty"`
-	IPAM   map[string]any `json:"ipam,omitempty"`
-	VLAN   int            `json:"vlan,omitempty"`
+	Type          string         `json:"type"`
+	Bridge        string         `json:"bridge,omitempty"`
+	IPAM          map[string]any `json:"ipam,omitempty"`
+	VLAN          int            `json:"vlan,omitempty"`
+	MACSpoofCheck bool           `json:"macspoofchk"`
 }
 
 func (m *NetworkManager) GetOrCreateNetworkConfiguration(ctx context.Context, machine *vitistackv1alpha1.Machine, remoteClient client.Client) (*kubevirtv1.Network, error) {
@@ -239,10 +240,11 @@ func (m *NetworkManager) createNetworkAttachmentDefinition(ctx context.Context, 
 		Name:       "br0",
 		Plugins: []NetworkAttachmentConfigPlugin{
 			{
-				Type:   "bridge",
-				Bridge: "br0",
-				IPAM:   map[string]any{},
-				VLAN:   vlanId,
+				Type:          "bridge",
+				Bridge:        "br0",
+				IPAM:          map[string]any{},
+				VLAN:          vlanId,
+				MACSpoofCheck: false,
 			},
 		},
 	}
@@ -309,7 +311,6 @@ func (m *NetworkManager) CleanupNetworkAttachmentDefinition(ctx context.Context,
 		Name:      nadName,
 		Namespace: namespace,
 	}, nad)
-
 	if err != nil {
 		if errors.IsNotFound(err) {
 			logger.Info("NetworkAttachmentDefinition not found, nothing to cleanup",

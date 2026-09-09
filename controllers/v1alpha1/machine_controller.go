@@ -94,12 +94,24 @@ const (
 // +kubebuilder:rbac:groups=storage.k8s.io,resources=storageclasses,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list
 
+// TODO: refactor to lower complexity
+//
+//gocyclo:ignore
 func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	machine, result, stop, err := r.fetchAndInitMachine(ctx, req)
 	if stop || err != nil {
 		return result, err
+	}
+
+	// if the machine is part of a cluster, we need clusterID and the machine's role in the cluster to be set
+	if machine.Spec.Tags["cluster"] != "" {
+		err := ensureAnnotationForClusters(machine)
+		if err != nil {
+			logger.Error(err, "ensure annotation for cluster machines")
+			return ctrl.Result{}, err
+		}
 	}
 
 	// Get the remote KubeVirt client for this machine
@@ -301,6 +313,9 @@ func (r *MachineReconciler) fetchAndInitMachine(ctx context.Context, req ctrl.Re
 		}
 		return machine, ctrl.Result{RequeueAfter: RequeueDelay}, true, nil
 	}
+
+	// TODO: ensure machine.Spec exists?
+
 	return machine, ctrl.Result{}, false, nil
 }
 
@@ -801,4 +816,11 @@ func (r *MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrent}).
 		Named("kubevirt-machine").
 		Complete(r)
+}
+
+func ensureAnnotationForClusters(m *vitistackv1alpha1.Machine) error {
+	if m.Labels[vitistackv1alpha1.ClusterIdAnnotation] == "" || m.Labels[vitistackv1alpha1.NodeRoleAnnotation] == "" {
+		return fmt.Errorf("machine is missing clusterid and/or node role annotations")
+	}
+	return nil
 }

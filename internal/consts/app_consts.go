@@ -75,4 +75,11 @@ const (
 	// REMOTE_CLIENT_BURST is the client-side burst for remote KubeVirt cluster
 	// clients. client-go defaults to 10. Default: 100.
 	REMOTE_CLIENT_BURST = "REMOTE_CLIENT_BURST"
+	// PLACEMENT_POLICY enables quick switching between spread constraints or
+	// anti affinity for testing. Valid values are "spreadconstraint" and
+	// "antiaffinity".
+	PLACEMENT_POLICY = "PLACEMENT_POLICY"
+	// DESCHEDULER_ANNOTATION (bool) controls whether to add annotation that will
+	// enable the Kubernetes Descheduler to automatically deschedule pods.
+	DESCHEDULER_ANNOTATION = "DESCHEDULER_ANNOTATION"
 )
