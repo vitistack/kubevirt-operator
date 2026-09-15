@@ -334,7 +334,8 @@ func (m *VMManager) buildSharedISODataVolume(ctx context.Context, machine *vitis
 }
 
 // GCOrphanedSharedISOs deletes shared boot-ISO DataVolumes in the namespace
-// that are no longer referenced by any VirtualMachine. Deleting the DataVolume
+// that are no longer referenced by any VirtualMachine template or running
+// VirtualMachineInstance (see referencedPVCClaimNames). Deleting the DataVolume
 // cascades to its backing PVC. This is a no-op when the shared-ISO feature is
 // disabled. It is best-effort: errors are logged and a partial sweep is fine,
 // since the next machine deletion in the namespace retries.
@@ -362,7 +363,7 @@ func (m *VMManager) GCOrphanedSharedISOs(ctx context.Context, namespace string) 
 
 	referenced, err := m.referencedPVCClaimNames(ctx, namespace)
 	if err != nil {
-		logger.Error(err, "Failed to list VMs for shared boot-ISO GC; skipping", "namespace", namespace)
+		logger.Error(err, "Failed to list VMs/VMIs for shared boot-ISO GC; skipping", "namespace", namespace)
 		return
 	}
 
@@ -380,31 +381,47 @@ func (m *VMManager) GCOrphanedSharedISOs(ctx context.Context, namespace string) 
 }
 
 // referencedPVCClaimNames returns the set of PVC claim names referenced by any
-// VirtualMachine in the namespace — both directly via PersistentVolumeClaim
-// volume sources and via DataVolume volume sources (whose backing PVC shares the
-// DataVolume's name). Used to decide whether a shared boot-ISO volume is still
-// in use.
+// VirtualMachine template or VirtualMachineInstance in the namespace — both
+// directly via PersistentVolumeClaim volume sources and via DataVolume volume
+// sources (whose backing PVC shares the DataVolume's name). Used to decide
+// whether a shared boot-ISO volume is still in use.
+//
+// VM templates alone are not enough: after OS install CleanupISOResources
+// strips the CDROM from the VM template, but the running VMI keeps the shared
+// PVC mounted until its next restart. Deleting the DataVolume then leaves the
+// PVC stuck Terminating behind kubernetes.io/pvc-protection.
 func (m *VMManager) referencedPVCClaimNames(ctx context.Context, namespace string) (map[string]struct{}, error) {
 	vmList := &kubevirtv1.VirtualMachineList{}
 	if err := m.remoteClient.List(ctx, vmList, client.InNamespace(namespace)); err != nil {
 		return nil, err
 	}
+	vmiList := &kubevirtv1.VirtualMachineInstanceList{}
+	if err := m.remoteClient.List(ctx, vmiList, client.InNamespace(namespace)); err != nil {
+		return nil, err
+	}
 
 	referenced := make(map[string]struct{})
 	for i := range vmList.Items {
-		tmpl := vmList.Items[i].Spec.Template
-		if tmpl == nil {
-			continue
-		}
-		for j := range tmpl.Spec.Volumes {
-			vol := &tmpl.Spec.Volumes[j]
-			if vol.PersistentVolumeClaim != nil {
-				referenced[vol.PersistentVolumeClaim.ClaimName] = struct{}{}
-			}
-			if vol.DataVolume != nil {
-				referenced[vol.DataVolume.Name] = struct{}{}
-			}
+		if tmpl := vmList.Items[i].Spec.Template; tmpl != nil {
+			addReferencedClaimNames(referenced, tmpl.Spec.Volumes)
 		}
 	}
+	for i := range vmiList.Items {
+		addReferencedClaimNames(referenced, vmiList.Items[i].Spec.Volumes)
+	}
 	return referenced, nil
+}
+
+// addReferencedClaimNames records the PVC claim name behind every PVC- or
+// DataVolume-backed volume.
+func addReferencedClaimNames(referenced map[string]struct{}, volumes []kubevirtv1.Volume) {
+	for i := range volumes {
+		vol := &volumes[i]
+		if vol.PersistentVolumeClaim != nil {
+			referenced[vol.PersistentVolumeClaim.ClaimName] = struct{}{}
+		}
+		if vol.DataVolume != nil {
+			referenced[vol.DataVolume.Name] = struct{}{}
+		}
+	}
 }
