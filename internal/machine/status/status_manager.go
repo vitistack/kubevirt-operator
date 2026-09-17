@@ -30,6 +30,7 @@ import (
 	"github.com/vitistack/kubevirt-operator/internal/consts"
 	"github.com/vitistack/kubevirt-operator/internal/machine/events"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -80,10 +81,21 @@ func (m *StatusManager) UpdateMachineStatusWithDetails(ctx context.Context, mach
 			return err
 		}
 
+		desired := machine.Status
+		desired.Provider = "kubevirt"
+
+		// Reconciles requeue every few seconds. Writing a status whose only
+		// change is LastUpdated produces a watch event for every Machine
+		// watcher, so skip the write and hand the stored status back instead.
+		if statusEqualIgnoringLastUpdated(&latestMachine.Status, &desired) {
+			machine.Status = latestMachine.Status
+			machine.ResourceVersion = latestMachine.ResourceVersion
+			return nil
+		}
+
 		// Update the status fields - only use fields that exist in the external CRD
-		latestMachine.Status = machine.Status
+		latestMachine.Status = desired
 		latestMachine.Status.LastUpdated = metav1.Now()
-		latestMachine.Status.Provider = "kubevirt"
 
 		// Note: The Status field and Conditions field might not exist in the external CRD Go types
 		// We log error details instead and rely on the State field for error indication
@@ -105,6 +117,17 @@ func (m *StatusManager) UpdateMachineStatusWithDetails(ctx context.Context, mach
 	}
 
 	return fmt.Errorf("failed to update Machine status after %d retries", maxRetries)
+}
+
+// statusEqualIgnoringLastUpdated reports whether two Machine statuses are
+// semantically equal apart from LastUpdated. Semantic equality treats nil and
+// empty lists as equal and compares times by instant, which matches what a
+// round trip through the API server preserves.
+func statusEqualIgnoringLastUpdated(a, b *vitistackv1alpha1.MachineStatus) bool {
+	ac, bc := *a, *b
+	ac.LastUpdated = metav1.Time{}
+	bc.LastUpdated = metav1.Time{}
+	return equality.Semantic.DeepEqual(ac, bc)
 }
 
 // UpdateMachineStatusFromVMAndVMI determines and updates machine status based on VM and VMI state
