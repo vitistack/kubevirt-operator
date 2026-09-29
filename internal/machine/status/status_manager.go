@@ -29,7 +29,6 @@ import (
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/internal/consts"
 	"github.com/vitistack/kubevirt-operator/internal/machine/events"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -163,7 +162,7 @@ func (m *StatusManager) evaluateState(machine *vitistackv1alpha1.Machine, vm *ku
 
 	// When the VMI is Running, use the VMI state and extract runtime details (IPs, disks, etc.)
 	if vmiExists && vmi.Status.Phase == kubevirtv1.Running {
-		if err := m.updateStatusFromPodVMVMIStatus(ctx, machine, vmi, remoteClient); err != nil {
+		if err := m.updateStatusFromVMI(ctx, machine, vmi); err != nil {
 			logger.Error(err, "Failed to update vm and vmi status information", "vmi", vmi.Name)
 		}
 		return consts.MachineStateRunning, consts.MachinePhaseRunning, false
@@ -295,18 +294,13 @@ func (m *StatusManager) checkVMErrorsAndUpdateStatus(ctx context.Context, machin
 	return nil
 }
 
-// updateStatusFromPodVMVMIStatus fetches the Pod created by the VMI from the remote cluster and extracts HostIP and PodIP, and update status from VM
-func (m *StatusManager) updateStatusFromPodVMVMIStatus(ctx context.Context, machine *vitistackv1alpha1.Machine, vmi *kubevirtv1.VirtualMachineInstance, remoteClient client.Client) error {
-	// Get all Pods in the VMI's namespace from the remote cluster and find one that contains the VMI name
-	// KubeVirt creates Pods with names that contain the VMI name but may have additional suffixes
-	podList := &corev1.PodList{}
-	if err := remoteClient.List(ctx, podList, client.InNamespace(vmi.Namespace)); err != nil {
-		return fmt.Errorf("failed to list Pods in namespace %s from remote cluster: %w", vmi.Namespace, err)
-	}
-
-	matchedPod := findMatchingPod(podList, machine.Name)
-	if matchedPod == nil {
-		return nil // Not an error - Pod might not be created yet
+// updateStatusFromVMI populates the Machine status network and disk information
+// from a running VMI.
+func (m *StatusManager) updateStatusFromVMI(ctx context.Context, machine *vitistackv1alpha1.Machine, vmi *kubevirtv1.VirtualMachineInstance) error {
+	// ActivePods stays empty until virt-controller has a launcher Pod for the VMI,
+	// so this avoids publishing addresses for a VMI that is not actually scheduled.
+	if len(vmi.Status.ActivePods) == 0 {
+		return nil
 	}
 
 	// Extract network interfaces from VMI
@@ -364,20 +358,6 @@ func (m *StatusManager) updateStatusFromPodVMVMIStatus(ctx context.Context, mach
 	}
 	machine.Status.Disks = diskVolumes
 
-	return nil
-}
-
-// findMatchingPod searches for a pod with the matching source-machine label
-func findMatchingPod(podList *corev1.PodList, machineName string) *corev1.Pod {
-	for i := range podList.Items {
-		pod := &podList.Items[i]
-		if pod.Labels == nil {
-			continue
-		}
-		if value, ok := pod.Labels["vitistack.io/source-machine"]; ok && value == machineName {
-			return pod
-		}
-	}
 	return nil
 }
 
