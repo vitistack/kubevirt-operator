@@ -65,6 +65,8 @@ spec:
             - name: NETWORK_ATTACHMENT_DEFINITION_CNI_VERSION
               value: {{ .Values.nadCniVersion | quote }}
             {{- end }}
+            - name: NAD_DISABLE_CONTAINER_INTERFACE
+              value: {{ .Values.nadDisableContainerInterface | quote }}
             - name: IP_SOURCE
               value: {{ .Values.ipSource | quote }}
             - name: KUBEVIRT_SUPPORT_CONTAINERIZED_DATA_IMPORTER

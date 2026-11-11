@@ -51,6 +51,7 @@ The operator can be configured using environment variables:
 ### Network Configuration
 
 - **`NETWORK_ATTACHMENT_DEFINITION_CNI_VERSION`**: CNI version for NetworkAttachmentDefinitions (default: `1.0.0`)
+- **`NAD_DISABLE_CONTAINER_INTERFACE`**: Set `disableContainerInterface` on the bridge plugin of new NetworkAttachmentDefinitions (default: `true`). Keeps a live-migration target pod from announcing the guest MAC before switchover, which can cut the VM off on a fabric that dampens MAC moves. Existing NetworkAttachmentDefinitions are not changed.
 
 ### Operator Configuration
 

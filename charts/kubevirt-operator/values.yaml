@@ -152,6 +152,9 @@ cpuModel: ""
 disableHtCpuFeature: true
 # CNI version for NetworkAttachmentDefinitions
 nadCniVersion: "1.0.0"
+# Set disableContainerInterface on the bridge plugin of new NetworkAttachmentDefinitions,
+# so a live-migration target does not announce the guest MAC before switchover.
+nadDisableContainerInterface: true
 # Where to fetch public IPs from: "vmi" (default, from KubeVirt VMI) or "networkconfiguration"
 ipSource: "vmi"
 # Enable Containerized Data Importer (CDI) support
