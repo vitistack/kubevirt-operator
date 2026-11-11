@@ -2,7 +2,9 @@ package vm
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
@@ -11,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	kubevirtv1 "kubevirt.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -28,6 +31,51 @@ const (
 
 const kubernetesClusterKind = "KubernetesCluster"
 
+// environmentLookupTimeout bounds the read of the owning KubernetesCluster, so
+// an unreachable or forbidden API reaches the production fallback.
+const environmentLookupTimeout = 10 * time.Second
+
+// SetClusterReader sets the reader used to look up a machine's
+// KubernetesCluster. Pass an uncached reader: a cached client would start an
+// informer and wait for it to sync.
+func (m *VMManager) SetClusterReader(r client.Reader) {
+	m.clusterReader = r
+}
+
+// prodPool parses PROD_POOL_NODE_LABEL (key=value). ok is false when no pool
+// is configured.
+func prodPool() (key, value string, ok bool, err error) {
+	raw := strings.TrimSpace(viper.GetString(consts.PROD_POOL_NODE_LABEL))
+	if raw == "" {
+		return "", "", false, nil
+	}
+	key, value, found := strings.Cut(raw, "=")
+	if !found {
+		return "", "", false, fmt.Errorf("%s %q: expected key=value", consts.PROD_POOL_NODE_LABEL, raw)
+	}
+	if errs := validation.IsQualifiedName(key); len(errs) > 0 {
+		return "", "", false, fmt.Errorf("%s %q: invalid label key: %s", consts.PROD_POOL_NODE_LABEL, raw, strings.Join(errs, "; "))
+	}
+	if errs := validation.IsValidLabelValue(value); len(errs) > 0 {
+		return "", "", false, fmt.Errorf("%s %q: invalid label value: %s", consts.PROD_POOL_NODE_LABEL, raw, strings.Join(errs, "; "))
+	}
+	return key, value, true, nil
+}
+
+// ValidatePlacementSettings rejects a malformed pool label or placement mode,
+// so a typo stops the operator at startup instead of misplacing VMs.
+func ValidatePlacementSettings() error {
+	if _, _, _, err := prodPool(); err != nil {
+		return err
+	}
+	switch mode := viper.GetString(consts.PROD_POOL_PLACEMENT); mode {
+	case PlacementRequired, PlacementPreferred:
+		return nil
+	default:
+		return fmt.Errorf("%s %q: expected %q or %q", consts.PROD_POOL_PLACEMENT, mode, PlacementRequired, PlacementPreferred)
+	}
+}
+
 // machineEnvironment returns the environment declared on the KubernetesCluster
 // that owns the machine, lower-cased. It returns "" when the machine has no
 // such owner or the cluster cannot be read: the caller treats that as
@@ -38,8 +86,14 @@ func (m *VMManager) machineEnvironment(ctx context.Context, machine *vitistackv1
 		if owner.Kind != kubernetesClusterKind {
 			continue
 		}
+		reader := m.clusterReader
+		if reader == nil {
+			reader = m.supervisorClient
+		}
+		lookupCtx, cancel := context.WithTimeout(ctx, environmentLookupTimeout)
+		defer cancel()
 		cluster := &vitistackv1alpha1.KubernetesCluster{}
-		if err := m.supervisorClient.Get(ctx, types.NamespacedName{Name: owner.Name, Namespace: machine.Namespace}, cluster); err != nil {
+		if err := reader.Get(lookupCtx, types.NamespacedName{Name: owner.Name, Namespace: machine.Namespace}, cluster); err != nil {
 			logger.Error(err, "Failed to read the machine's KubernetesCluster; treating it as production", "cluster", owner.Name)
 			return ""
 		}
@@ -57,8 +111,9 @@ func isProduction(env string) bool {
 
 // applyPlacement labels the VM with its environment and, for a production VM
 // on a site with a pool configured, adds node affinity for the pool. It keeps
-// any pod affinity already set by the placement policy.
-func applyPlacement(ctx context.Context, vm *kubevirtv1.VirtualMachine, env string) *kubevirtv1.VirtualMachine {
+// any pod affinity already set by the placement policy. It fails on a
+// malformed pool setting rather than creating a production VM without the rule.
+func applyPlacement(vm *kubevirtv1.VirtualMachine, env string) (*kubevirtv1.VirtualMachine, error) {
 	label := env
 	if label == "" || len(validation.IsValidLabelValue(label)) > 0 {
 		label = EnvironmentUnknown
@@ -72,14 +127,12 @@ func applyPlacement(ctx context.Context, vm *kubevirtv1.VirtualMachine, env stri
 	vm.Labels[LabelEnvironment] = label
 	vm.Spec.Template.ObjectMeta.Labels[LabelEnvironment] = label
 
-	pool := strings.TrimSpace(viper.GetString(consts.PROD_POOL_NODE_LABEL))
-	if pool == "" || !isProduction(env) {
-		return vm
+	key, value, ok, err := prodPool()
+	if err != nil {
+		return nil, err
 	}
-	key, value, ok := strings.Cut(pool, "=")
-	if !ok || key == "" || value == "" {
-		log.FromContext(ctx).Error(nil, "Ignoring PROD_POOL_NODE_LABEL: expected key=value", "value", pool)
-		return vm
+	if !ok || !isProduction(env) {
+		return vm, nil
 	}
 
 	term := corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -95,5 +148,5 @@ func applyPlacement(ctx context.Context, vm *kubevirtv1.VirtualMachine, env stri
 		vm.Spec.Template.Spec.Affinity = &corev1.Affinity{}
 	}
 	vm.Spec.Template.Spec.Affinity.NodeAffinity = nodeAffinity
-	return vm
+	return vm, nil
 }

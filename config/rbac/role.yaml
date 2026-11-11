@@ -89,6 +89,11 @@ rules:
   - vitistack.io
   resources:
   - kubernetesclusters
+  verbs:
+  - get
+- apiGroups:
+  - vitistack.io
+  resources:
   - kubevirtconfigs
   verbs:
   - get

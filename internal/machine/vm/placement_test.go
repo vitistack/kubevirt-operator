@@ -14,6 +14,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
+const (
+	envProd  = "prod"
+	envTest  = "test"
+	testPool = "example.io/pool=prod"
+)
+
 func newPlacementVM() *kubevirtv1.VirtualMachine {
 	return &kubevirtv1.VirtualMachine{Spec: kubevirtv1.VirtualMachineSpec{
 		Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{},
@@ -40,22 +46,24 @@ func TestMachineEnvironment(t *testing.T) {
 		return m
 	}
 	cl := fake.NewClientBuilder().WithScheme(scheme).
-		WithObjects(cluster("prod", " Prod "), cluster("test", "test")).Build()
-	m := &VMManager{supervisorClient: cl}
+		WithObjects(cluster("c-prod", " Prod "), cluster("c-test", envTest)).Build()
 
 	for _, tc := range []struct {
 		name  string
 		owner string
 		want  string
 	}{
-		{"declared, trimmed and lower-cased", "prod", "prod"},
-		{"non-production", "test", "test"},
+		{"declared, trimmed and lower-cased", "c-prod", envProd},
+		{"non-production", "c-test", envTest},
 		{"owner missing in the cluster", "gone", ""},
 		{"no owner reference", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := m.machineEnvironment(context.Background(), owned(tc.owner)); got != tc.want {
-				t.Fatalf("environment = %q, want %q", got, tc.want)
+			// Both paths: the uncached reader main wires in, and the fallback.
+			for _, m := range []*VMManager{{clusterReader: cl}, {supervisorClient: cl}} {
+				if got := m.machineEnvironment(context.Background(), owned(tc.owner)); got != tc.want {
+					t.Fatalf("environment = %q, want %q", got, tc.want)
+				}
 			}
 		})
 	}
@@ -64,7 +72,6 @@ func TestMachineEnvironment(t *testing.T) {
 // TestApplyPlacement pins the label every VM gets and which VMs get the pool
 // rule, in which form.
 func TestApplyPlacement(t *testing.T) {
-	const pool = "example.io/pool=prod"
 	for _, tc := range []struct {
 		name      string
 		env       string
@@ -73,13 +80,13 @@ func TestApplyPlacement(t *testing.T) {
 		wantLabel string
 		want      string // "", "required" or "preferred"
 	}{
-		{"production, required by default", "prod", pool, "", "prod", PlacementRequired},
-		{"second spelling", "production", pool, PlacementRequired, "production", PlacementRequired},
-		{"unknown counts as production", "", pool, PlacementRequired, EnvironmentUnknown, PlacementRequired},
-		{"preferred mode", "prod", pool, PlacementPreferred, "prod", PlacementPreferred},
-		{"non-production is not steered", "test", pool, PlacementRequired, "test", ""},
-		{"no pool configured", "prod", "", PlacementRequired, "prod", ""},
-		{"malformed pool is ignored", "prod", "no-equals-sign", PlacementRequired, "prod", ""},
+		{"production, required", envProd, testPool, PlacementRequired, envProd, PlacementRequired},
+		{"second spelling", "production", testPool, PlacementRequired, "production", PlacementRequired},
+		{"unknown counts as production", "", testPool, PlacementRequired, EnvironmentUnknown, PlacementRequired},
+		{"preferred mode", envProd, testPool, PlacementPreferred, envProd, PlacementPreferred},
+		{"empty label value is a valid pool", envProd, "example.io/pool=", PlacementRequired, envProd, PlacementRequired},
+		{"non-production is not steered", envTest, testPool, PlacementRequired, envTest, ""},
+		{"no pool configured", envProd, "", PlacementRequired, envProd, ""},
 		{"invalid label value", "not a label!", "", PlacementRequired, EnvironmentUnknown, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -87,48 +94,86 @@ func TestApplyPlacement(t *testing.T) {
 			viper.Set(consts.PROD_POOL_PLACEMENT, tc.mode)
 			t.Cleanup(viper.Reset)
 
-			vm := applyPlacement(context.Background(), newPlacementVM(), tc.env)
-
+			vm, err := applyPlacement(newPlacementVM(), tc.env)
+			if err != nil {
+				t.Fatalf("applyPlacement: %v", err)
+			}
 			if got := vm.Labels[LabelEnvironment]; got != tc.wantLabel {
 				t.Errorf("VM label = %q, want %q", got, tc.wantLabel)
 			}
 			if got := vm.Spec.Template.ObjectMeta.Labels[LabelEnvironment]; got != tc.wantLabel {
 				t.Errorf("template label = %q, want %q", got, tc.wantLabel)
 			}
-
-			aff := vm.Spec.Template.Spec.Affinity
-			switch tc.want {
-			case "":
-				if aff != nil {
-					t.Fatalf("affinity = %+v, want none", aff)
-				}
-			case PlacementRequired:
-				if aff == nil || aff.NodeAffinity == nil || aff.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
-					t.Fatalf("want required node affinity, got %+v", aff)
-				}
-				if len(aff.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 0 {
-					t.Errorf("unexpected preferred terms")
-				}
-				req := aff.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[0]
-				if req.Key != "example.io/pool" || req.Operator != corev1.NodeSelectorOpIn || len(req.Values) != 1 || req.Values[0] != "prod" {
-					t.Errorf("requirement = %+v", req)
-				}
-			case PlacementPreferred:
-				if aff == nil || aff.NodeAffinity == nil || len(aff.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 1 {
-					t.Fatalf("want one preferred term, got %+v", aff)
-				}
-				if aff.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
-					t.Errorf("unexpected required terms")
-				}
+			if got := nodeAffinityForm(vm); got != tc.want {
+				t.Errorf("node affinity = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// nodeAffinityForm says which pool rule the VM carries: "", "required" or
+// "preferred"; "invalid" when it carries anything else.
+func nodeAffinityForm(vm *kubevirtv1.VirtualMachine) string {
+	aff := vm.Spec.Template.Spec.Affinity
+	if aff == nil || aff.NodeAffinity == nil {
+		return ""
+	}
+	req, pref := aff.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution, aff.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution
+	switch {
+	case req != nil && len(pref) == 0 && len(req.NodeSelectorTerms) == 1 && isPoolTerm(req.NodeSelectorTerms[0]):
+		return PlacementRequired
+	case req == nil && len(pref) == 1 && isPoolTerm(pref[0].Preference):
+		return PlacementPreferred
+	}
+	return "invalid"
+}
+
+func isPoolTerm(term corev1.NodeSelectorTerm) bool {
+	if len(term.MatchExpressions) != 1 {
+		return false
+	}
+	r := term.MatchExpressions[0]
+	return r.Key == "example.io/pool" && r.Operator == corev1.NodeSelectorOpIn && len(r.Values) == 1
+}
+
+// TestPlacementSettingsValidation pins which settings are refused, both at
+// startup and when a VM is built.
+func TestPlacementSettingsValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name, pool, mode string
+		wantErr          bool
+	}{
+		{"unset pool", "", PlacementRequired, false},
+		{"valid pool", testPool, PlacementPreferred, false},
+		{"no equals sign", "example.io/pool", PlacementRequired, true},
+		{"second equals sign", "example.io/pool=prod=blue", PlacementRequired, true},
+		{"empty key", "=prod", PlacementRequired, true},
+		{"invalid key", "not a key=prod", PlacementRequired, true},
+		{"unknown mode", testPool, "sometimes", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			viper.Set(consts.PROD_POOL_NODE_LABEL, tc.pool)
+			viper.Set(consts.PROD_POOL_PLACEMENT, tc.mode)
+			t.Cleanup(viper.Reset)
+
+			if err := ValidatePlacementSettings(); (err != nil) != tc.wantErr {
+				t.Fatalf("ValidatePlacementSettings error = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+
+	// A malformed pool must fail the VM, not create it without the rule.
+	viper.Set(consts.PROD_POOL_NODE_LABEL, "example.io/pool=prod=blue")
+	t.Cleanup(viper.Reset)
+	if _, err := applyPlacement(newPlacementVM(), envProd); err == nil {
+		t.Fatal("applyPlacement accepted a malformed pool label")
 	}
 }
 
 // TestApplyPlacementKeepsPodAntiAffinity: the anti-affinity placement policy
 // sets the affinity block first; the pool rule must join it, not replace it.
 func TestApplyPlacementKeepsPodAntiAffinity(t *testing.T) {
-	viper.Set(consts.PROD_POOL_NODE_LABEL, "example.io/pool=prod")
+	viper.Set(consts.PROD_POOL_NODE_LABEL, testPool)
 	t.Cleanup(viper.Reset)
 
 	machine := &vitistackv1alpha1.Machine{ObjectMeta: metav1.ObjectMeta{Name: "m", Labels: map[string]string{
@@ -136,7 +181,10 @@ func TestApplyPlacementKeepsPodAntiAffinity(t *testing.T) {
 	}}}
 	vm := newPlacementVM()
 	vm.Spec.Template.ObjectMeta.Labels = map[string]string{}
-	vm = applyPlacement(context.Background(), addAntiAffinity(machine, vm), "prod")
+	vm, err := applyPlacement(addAntiAffinity(machine, vm), envProd)
+	if err != nil {
+		t.Fatalf("applyPlacement: %v", err)
+	}
 
 	aff := vm.Spec.Template.Spec.Affinity
 	if aff == nil || aff.PodAntiAffinity == nil {

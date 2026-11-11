@@ -93,8 +93,6 @@ rules:
   - kubernetesclusters
   verbs:
   - get
-  - list
-  - watch
 - apiGroups:
   - vitistack.io
   resources:

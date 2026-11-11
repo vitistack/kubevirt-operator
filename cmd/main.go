@@ -31,6 +31,7 @@ import (
 	vitistackv1alpha1 "github.com/vitistack/common/pkg/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/controllers/v1alpha1"
 	"github.com/vitistack/kubevirt-operator/internal/consts"
+	"github.com/vitistack/kubevirt-operator/internal/machine/vm"
 	"github.com/vitistack/kubevirt-operator/internal/services"
 	"github.com/vitistack/kubevirt-operator/internal/services/initializationservice"
 	"github.com/vitistack/kubevirt-operator/internal/settings"
@@ -89,6 +90,10 @@ func init() {
 func main() {
 	settings.Init()
 	vlog.Info("Starting kubevirt operator")
+	if err := vm.ValidatePlacementSettings(); err != nil {
+		setupLog.Error(err, "invalid placement settings")
+		os.Exit(1)
+	}
 	// Parse command line flags
 	config := parseFlags()
 
@@ -357,6 +362,7 @@ func addWatchersToManager(mgr ctrl.Manager, metricsCertWatcher, webhookCertWatch
 
 	// Setup controllers
 	machineReconciler := v1alpha1.NewMachineReconciler(mgr.GetClient(), mgr.GetScheme(), kubevirtClientMgr)
+	machineReconciler.VMManager.SetClusterReader(mgr.GetAPIReader())
 	if err := machineReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Machine")
 		os.Exit(1)
