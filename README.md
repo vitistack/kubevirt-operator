@@ -51,6 +51,7 @@ The operator can be configured using environment variables:
 ### Network Configuration
 
 - **`NETWORK_ATTACHMENT_DEFINITION_CNI_VERSION`**: CNI version for NetworkAttachmentDefinitions (default: `1.0.0`)
+- **`NAD_DISABLE_CONTAINER_INTERFACE`**: Set `disableContainerInterface` on the bridge plugin of new NetworkAttachmentDefinitions (default: `true`). The pod-side interface then stays down during CNI setup until KubeVirt raises it, which avoids the early guest-MAC announcement from a live-migration target that can cut the VM off on a fabric that dampens MAC moves. Existing NetworkAttachmentDefinitions are not changed.
 
 ### Operator Configuration
 

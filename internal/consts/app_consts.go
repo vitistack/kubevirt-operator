@@ -23,6 +23,12 @@ const (
 	DEFAULT_KUBEVIRT_CONFIG                   = "DEFAULT_KUBEVIRT_CONFIG"
 	VM_NAME_PREFIX                            = "VM_NAME_PREFIX"
 	PVC_VOLUME_MODE                           = "PVC_VOLUME_MODE"
+	// NAD_DISABLE_CONTAINER_INTERFACE, when true, sets disableContainerInterface
+	// on the bridge plugin of new NetworkAttachmentDefinitions. Without it a
+	// live-migration target pod announces the guest MAC seconds before
+	// switchover, and a fabric that dampens MAC moves can cut the VM off for
+	// minutes (kubevirt/kubevirt#17195). Enabled by default.
+	NAD_DISABLE_CONTAINER_INTERFACE = "NAD_DISABLE_CONTAINER_INTERFACE"
 	// PVC_ACCESS_MODE controls the access mode for PVCs and DataVolumes
 	// Valid values: "ReadWriteMany" (default), "ReadWriteOnce", "ReadOnlyMany"
 	PVC_ACCESS_MODE = "PVC_ACCESS_MODE"

@@ -49,6 +49,9 @@ type NetworkAttachmentConfigPlugin struct {
 	IPAM          map[string]any `json:"ipam,omitempty"`
 	VLAN          int            `json:"vlan,omitempty"`
 	MACSpoofCheck bool           `json:"macspoofchk"`
+	// DisableContainerInterface keeps the pod-side veth down until KubeVirt
+	// raises it. See consts.NAD_DISABLE_CONTAINER_INTERFACE.
+	DisableContainerInterface bool `json:"disableContainerInterface,omitempty"`
 }
 
 func (m *NetworkManager) GetOrCreateNetworkConfiguration(ctx context.Context, machine *vitistackv1alpha1.Machine, remoteClient client.Client) (*kubevirtv1.Network, error) {
@@ -251,6 +254,9 @@ func (m *NetworkManager) createNetworkAttachmentDefinition(ctx context.Context, 
 				IPAM:          map[string]any{},
 				VLAN:          vlanId,
 				MACSpoofCheck: false,
+				// The bridge plugin rejects this option together with an
+				// IPAM type; IPAM is always empty here.
+				DisableContainerInterface: viper.GetBool(consts.NAD_DISABLE_CONTAINER_INTERFACE),
 			},
 		},
 	}

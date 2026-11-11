@@ -26,6 +26,7 @@ func Init() {
 	viper.SetDefault(consts.CPU_MODEL, cpuModel)
 	viper.SetDefault(consts.DISABLE_CPU_HT_FEATURE, true)
 	viper.SetDefault(consts.NETWORK_ATTACHMENT_DEFINITION_CNI_VERSION, "1.0.0")
+	viper.SetDefault(consts.NAD_DISABLE_CONTAINER_INTERFACE, true)
 	viper.SetDefault(consts.NAMESPACE, "default")
 	viper.SetDefault(consts.LOG_JSON, true)
 	viper.SetDefault(consts.LOG_LEVEL, "info")
