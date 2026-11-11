@@ -90,6 +90,14 @@ rules:
 - apiGroups:
   - vitistack.io
   resources:
+  - kubernetesclusters
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - vitistack.io
+  resources:
   - kubevirtconfigs
   verbs:
   - get

@@ -99,6 +99,10 @@ spec:
             - name: PLACEMENT_POLICY
               value: {{ .Values.placementPolicy | quote }}
             {{- end }}
+            - name: PROD_POOL_NODE_LABEL
+              value: {{ .Values.prodPoolNodeLabel | quote }}
+            - name: PROD_POOL_PLACEMENT
+              value: {{ .Values.prodPoolPlacement | quote }}
             {{- if .Values.deschedulerAnnotation }}
             - name: DESCHEDULER_ANNOTATION
               value: {{ .Values.deschedulerAnnotation | quote }}

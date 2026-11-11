@@ -47,6 +47,8 @@ The operator can be configured using environment variables:
 - **`CPU_MODEL`**: CPU model for VMs (default: `host-model` for x86_64, `host-passthrough` for ARM)
 - **`DISABLE_CPU_HT_FEATURE`**: Disable the `ht` CPU feature on `host-model` VMs (default: `true`). Workaround for a libvirt host-model regression in KubeVirt ≥ v1.8.0 where VMs fail to start with `guest CPU doesn't match specification: extra features: ht`. Only affects `host-model`; ignored for other CPU models. See [docs/disable-ht-cpu-feature.md](docs/disable-ht-cpu-feature.md).
 - **`VM_NAME_PREFIX`**: Prefix for VM names (default: `vm-`)
+- **`PROD_POOL_NODE_LABEL`**: Node label (`key=value`) that marks the hosts meant for production VMs (default: empty, no rule). When set, VMs of a production cluster get node affinity for it. The environment is read from `spec.data.environment` of the KubernetesCluster that owns the Machine; `prod`, `production` and an unknown environment count as production. Every VM is labelled `vitistack.io/environment`. Only VMs created from now on are affected.
+- **`PROD_POOL_PLACEMENT`**: `required` (default) or `preferred`. With `required`, a production VM stays unschedulable when the pool has no room.
 
 ### Network Configuration
 

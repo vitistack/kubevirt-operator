@@ -257,6 +257,8 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 
 	}
 
+	vm = applyPlacement(ctx, vm, m.machineEnvironment(ctx, machine))
+
 	if viper.GetBool(consts.DESCHEDULER_ANNOTATION) {
 		vm = addDeschedulerAnnotation(vm)
 	}

@@ -85,6 +85,13 @@ const (
 	// anti affinity for testing. Valid values are "spreadconstraint" and
 	// "antiaffinity".
 	PLACEMENT_POLICY = "PLACEMENT_POLICY"
+	// PROD_POOL_NODE_LABEL names the node label (key=value) that marks the
+	// hosts meant for production VMs. When set, VMs of a production cluster get
+	// node affinity for it. Empty (default) adds no placement rule.
+	PROD_POOL_NODE_LABEL = "PROD_POOL_NODE_LABEL"
+	// PROD_POOL_PLACEMENT is "required" (default) or "preferred". Required
+	// leaves a production VM unschedulable when the pool has no room.
+	PROD_POOL_PLACEMENT = "PROD_POOL_PLACEMENT"
 	// DESCHEDULER_ANNOTATION (bool) controls whether to add annotation that will
 	// enable the Kubernetes Descheduler to automatically deschedule pods.
 	DESCHEDULER_ANNOTATION = "DESCHEDULER_ANNOTATION"
