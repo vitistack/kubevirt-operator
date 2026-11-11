@@ -90,12 +90,14 @@ func init() {
 func main() {
 	settings.Init()
 	vlog.Info("Starting kubevirt operator")
+	// Parse command line flags
+	config := parseFlags()
+
+	// After parseFlags, which sets up the logger: the error must reach the pod log.
 	if err := vm.ValidatePlacementSettings(); err != nil {
 		setupLog.Error(err, "invalid placement settings")
 		os.Exit(1)
 	}
-	// Parse command line flags
-	config := parseFlags()
 
 	// Initialize k8sclient
 	k8sclient.Init()
