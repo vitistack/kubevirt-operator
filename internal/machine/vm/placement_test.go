@@ -106,6 +106,9 @@ func TestApplyPlacement(t *testing.T) {
 		{"unknown stays on the pool under forbidden", "", testPool, PlacementRequired, NonProdForbidden, EnvironmentUnknown, reqIn},
 		{"management stays on the pool under forbidden", envMgmt, testPool, PlacementRequired, NonProdForbidden, envMgmt, reqIn},
 		{"forbidden without a pool adds nothing", envTest, "", PlacementRequired, NonProdForbidden, envTest, ""},
+		// The label decides: a VM labelled unknown is production, whatever the raw value was.
+		{"declared unknown stays on the pool under forbidden", EnvironmentUnknown, testPool, PlacementRequired, NonProdForbidden, EnvironmentUnknown, reqIn},
+		{"invalid environment stays on the pool under forbidden", "not a label!", testPool, PlacementRequired, NonProdForbidden, EnvironmentUnknown, reqIn},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			viper.Set(consts.PROD_POOL_NODE_LABEL, tc.pool)

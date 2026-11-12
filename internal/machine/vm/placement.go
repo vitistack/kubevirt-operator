@@ -128,11 +128,13 @@ func (m *VMManager) machineEnvironment(ctx context.Context, machine *vitistackv1
 	return ""
 }
 
-// isProduction says whether env is a production environment. Management
-// clusters run production infrastructure, and an unknown environment also
-// counts as production.
-func isProduction(env string) bool {
-	return env == "" || env == "prod" || env == "production" || env == "mgmt"
+// isProduction says whether a VM with this environment label is production.
+// It reads the label rather than the raw environment, so the label and the
+// rule always agree. Management clusters run production infrastructure, and a
+// VM labelled unknown (no environment, an unreadable cluster, or a value that
+// is not a valid label) also counts as production.
+func isProduction(label string) bool {
+	return label == "prod" || label == "mgmt" || label == EnvironmentUnknown
 }
 
 // environmentLabel is the label value for env: "production" is written as
@@ -172,7 +174,7 @@ func applyPlacement(vm *kubevirtv1.VirtualMachine, env string) (*kubevirtv1.Virt
 	}
 
 	operator, mode := corev1.NodeSelectorOpIn, viper.GetString(consts.PROD_POOL_PLACEMENT)
-	if !isProduction(env) {
+	if !isProduction(label) {
 		nonProd := viper.GetString(consts.NON_PROD_ON_PROD_POOL)
 		if err := validNonProd(nonProd); err != nil {
 			return nil, err

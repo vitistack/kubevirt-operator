@@ -107,7 +107,7 @@ spec:
             {{- if not (has $nonProd (list "allowed" "avoided" "forbidden")) }}
             {{- fail (printf "nonProdOnProdPool %q: expected allowed, avoided or forbidden" $nonProd) }}
             {{- end }}
-            {{- if and (ne $nonProd "allowed") (not .Values.prodPoolNodeLabel) }}
+            {{- if and (ne $nonProd "allowed") (not (.Values.prodPoolNodeLabel | default "" | trim)) }}
             {{- fail (printf "nonProdOnProdPool %q needs prodPoolNodeLabel to be set" $nonProd) }}
             {{- end }}
             - name: NON_PROD_ON_PROD_POOL
