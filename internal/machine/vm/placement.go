@@ -109,12 +109,21 @@ func isProduction(env string) bool {
 	return env == "" || env == "prod" || env == "production"
 }
 
+// environmentLabel is the label value for env: "production" is written as
+// "prod", so one selector finds every production VM.
+func environmentLabel(env string) string {
+	if env == "production" {
+		return "prod"
+	}
+	return env
+}
+
 // applyPlacement labels the VM with its environment and, for a production VM
 // on a site with a pool configured, adds node affinity for the pool. It keeps
 // any pod affinity already set by the placement policy. It fails on a
 // malformed pool setting rather than creating a production VM without the rule.
 func applyPlacement(vm *kubevirtv1.VirtualMachine, env string) (*kubevirtv1.VirtualMachine, error) {
-	label := env
+	label := environmentLabel(env)
 	if label == "" || len(validation.IsValidLabelValue(label)) > 0 {
 		label = EnvironmentUnknown
 	}

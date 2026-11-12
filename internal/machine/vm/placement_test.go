@@ -81,7 +81,7 @@ func TestApplyPlacement(t *testing.T) {
 		want      string // "", "required" or "preferred"
 	}{
 		{"production, required", envProd, testPool, PlacementRequired, envProd, PlacementRequired},
-		{"second spelling", "production", testPool, PlacementRequired, "production", PlacementRequired},
+		{"second spelling, labelled prod", "production", testPool, PlacementRequired, envProd, PlacementRequired},
 		{"unknown counts as production", "", testPool, PlacementRequired, EnvironmentUnknown, PlacementRequired},
 		{"preferred mode", envProd, testPool, PlacementPreferred, envProd, PlacementPreferred},
 		{"empty label value is a valid pool", envProd, "example.io/pool=", PlacementRequired, envProd, PlacementRequired},
