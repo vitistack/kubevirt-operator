@@ -83,6 +83,7 @@ func TestApplyPlacement(t *testing.T) {
 		{"production, required", envProd, testPool, PlacementRequired, envProd, PlacementRequired},
 		{"second spelling, labelled prod", "production", testPool, PlacementRequired, envProd, PlacementRequired},
 		{"unknown counts as production", "", testPool, PlacementRequired, EnvironmentUnknown, PlacementRequired},
+		{"management counts as production", "mgmt", testPool, PlacementRequired, "mgmt", PlacementRequired},
 		{"preferred mode", envProd, testPool, PlacementPreferred, envProd, PlacementPreferred},
 		{"empty label value is a valid pool", envProd, "example.io/pool=", PlacementRequired, envProd, PlacementRequired},
 		{"non-production is not steered", envTest, testPool, PlacementRequired, envTest, ""},

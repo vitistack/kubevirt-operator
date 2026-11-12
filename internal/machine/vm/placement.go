@@ -103,10 +103,11 @@ func (m *VMManager) machineEnvironment(ctx context.Context, machine *vitistackv1
 	return ""
 }
 
-// isProduction says whether env is a production environment. An unknown
-// environment counts as production.
+// isProduction says whether env is a production environment. Management
+// clusters run production infrastructure, and an unknown environment also
+// counts as production.
 func isProduction(env string) bool {
-	return env == "" || env == "prod" || env == "production"
+	return env == "" || env == "prod" || env == "production" || env == "mgmt"
 }
 
 // environmentLabel is the label value for env: "production" is written as
