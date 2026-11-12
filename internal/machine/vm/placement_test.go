@@ -17,6 +17,7 @@ import (
 const (
 	envProd  = "prod"
 	envTest  = "test"
+	envMgmt  = "mgmt"
 	testPool = "example.io/pool=prod"
 )
 
@@ -90,7 +91,7 @@ func TestApplyPlacement(t *testing.T) {
 		{"production, required", envProd, testPool, PlacementRequired, NonProdAllowed, envProd, reqIn},
 		{"second spelling, labelled prod", "production", testPool, PlacementRequired, NonProdAllowed, envProd, reqIn},
 		{"unknown counts as production", "", testPool, PlacementRequired, NonProdAllowed, EnvironmentUnknown, reqIn},
-		{"management counts as production", "mgmt", testPool, PlacementRequired, NonProdAllowed, "mgmt", reqIn},
+		{"management counts as production", envMgmt, testPool, PlacementRequired, NonProdAllowed, envMgmt, reqIn},
 		{"preferred mode", envProd, testPool, PlacementPreferred, NonProdAllowed, envProd, prefIn},
 		{"empty label value is a valid pool", envProd, "example.io/pool=", PlacementRequired, NonProdAllowed, envProd, reqIn},
 		{"non-production allowed is not steered", envTest, testPool, PlacementRequired, NonProdAllowed, envTest, ""},
@@ -103,7 +104,7 @@ func TestApplyPlacement(t *testing.T) {
 		{"avoided ignores the production mode", "qa", testPool, PlacementRequired, NonProdAvoided, "qa", prefNotIn},
 		{"production unaffected by forbidden", envProd, testPool, PlacementRequired, NonProdForbidden, envProd, reqIn},
 		{"unknown stays on the pool under forbidden", "", testPool, PlacementRequired, NonProdForbidden, EnvironmentUnknown, reqIn},
-		{"management stays on the pool under forbidden", "mgmt", testPool, PlacementRequired, NonProdForbidden, "mgmt", reqIn},
+		{"management stays on the pool under forbidden", envMgmt, testPool, PlacementRequired, NonProdForbidden, envMgmt, reqIn},
 		{"forbidden without a pool adds nothing", envTest, "", PlacementRequired, NonProdForbidden, envTest, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
