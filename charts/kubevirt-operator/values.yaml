@@ -228,8 +228,8 @@ placementPolicy: "spreadconstraint"
 prodPoolNodeLabel: ""
 # "required" (default) or "preferred". Required leaves a production VM unschedulable when the pool is full.
 prodPoolPlacement: "required"
-# May dev/test/qa VMs run on the production pool? "allowed" (default), "avoided" (only when other hosts are full)
-# or "forbidden" (never; unschedulable when other hosts are full). Needs prodPoolNodeLabel.
+# May dev/test/qa VMs run on the production pool? "allowed" (default), "avoided" (best effort; some may still land there)
+# or "forbidden" (never; unschedulable when other hosts are full). "avoided" and "forbidden" need prodPoolNodeLabel.
 nonProdOnProdPool: "allowed"
 
 # Descheduler: set "evict" annotation on pods
