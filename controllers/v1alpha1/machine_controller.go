@@ -78,6 +78,7 @@ const (
 // +kubebuilder:rbac:groups=vitistack.io,resources=machines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=vitistack.io,resources=machines/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=vitistack.io,resources=machines/finalizers,verbs=update
+// +kubebuilder:rbac:groups=vitistack.io,resources=kubernetesclusters,verbs=get
 // +kubebuilder:rbac:groups=vitistack.io,resources=kubevirtconfigs,verbs=get;list;watch
 // +kubebuilder:rbac:groups=vitistack.io,resources=networkconfigurations,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=vitistack.io,resources=networkconfigurations/status,verbs=get;update;patch

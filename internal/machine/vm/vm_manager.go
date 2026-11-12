@@ -49,6 +49,7 @@ const (
 type VMManager struct {
 	supervisorClient client.Client // Client for supervisor cluster (Machine CRDs)
 	remoteClient     client.Client // Client for remote KubeVirt cluster (VMs)
+	clusterReader    client.Reader // Uncached reader for KubernetesCluster lookups; falls back to supervisorClient
 	Scheme           *runtime.Scheme
 	NetworkManager   *network.NetworkManager
 	MacGenerator     macaddress.MacAddressGenerator
@@ -255,6 +256,11 @@ func (m *VMManager) CreateVirtualMachine(ctx context.Context, machine *vitistack
 		vm = addSpreadConstraints(machine, vm)
 	default:
 
+	}
+
+	vm, err = applyPlacement(vm, m.machineEnvironment(ctx, machine))
+	if err != nil {
+		return nil, err
 	}
 
 	if viper.GetBool(consts.DESCHEDULER_ANNOTATION) {

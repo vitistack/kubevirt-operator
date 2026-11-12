@@ -223,5 +223,11 @@ rbac:
 # Predefined placement poicies are "spreadconstraint" or "antiaffinity"
 placementPolicy: "spreadconstraint"
 
+# Production pool: node label (key=value) that marks the hosts meant for production VMs.
+# VMs of a production cluster get node affinity for it. Empty adds no placement rule.
+prodPoolNodeLabel: ""
+# "required" (default) or "preferred". Required leaves a production VM unschedulable when the pool is full.
+prodPoolPlacement: "required"
+
 # Descheduler: set "evict" annotation on pods
 deschedulerAnnotation: true
