@@ -92,6 +92,11 @@ const (
 	// PROD_POOL_PLACEMENT is "required" (default) or "preferred". Required
 	// leaves a production VM unschedulable when the pool has no room.
 	PROD_POOL_PLACEMENT = "PROD_POOL_PLACEMENT"
+	// NON_PROD_ON_PROD_POOL says whether VMs of a non-production cluster may run
+	// on the production pool: "allowed" (default, no rule), "avoided" (kept off
+	// while other hosts have room) or "forbidden" (never; unschedulable when the
+	// other hosts are full). Needs PROD_POOL_NODE_LABEL.
+	NON_PROD_ON_PROD_POOL = "NON_PROD_ON_PROD_POOL"
 	// DESCHEDULER_ANNOTATION (bool) controls whether to add annotation that will
 	// enable the Kubernetes Descheduler to automatically deschedule pods.
 	DESCHEDULER_ANNOTATION = "DESCHEDULER_ANNOTATION"
