@@ -17,6 +17,7 @@ import (
 const (
 	envProd  = "prod"
 	envTest  = "test"
+	envMgmt  = "mgmt"
 	testPool = "example.io/pool=prod"
 )
 
@@ -69,30 +70,50 @@ func TestMachineEnvironment(t *testing.T) {
 	}
 }
 
-// TestApplyPlacement pins the label every VM gets and which VMs get the pool
-// rule, in which form.
+// TestApplyPlacement pins the label every VM gets and which VMs get a pool
+// rule, in which form and direction.
 func TestApplyPlacement(t *testing.T) {
+	const (
+		reqIn     = PlacementRequired + " In"
+		prefIn    = PlacementPreferred + " In"
+		reqNotIn  = PlacementRequired + " NotIn"
+		prefNotIn = PlacementPreferred + " NotIn"
+	)
 	for _, tc := range []struct {
 		name      string
 		env       string
 		pool      string
 		mode      string
+		nonProd   string
 		wantLabel string
-		want      string // "", "required" or "preferred"
+		want      string // "" or "<form> <operator>"
 	}{
-		{"production, required", envProd, testPool, PlacementRequired, envProd, PlacementRequired},
-		{"second spelling, labelled prod", "production", testPool, PlacementRequired, envProd, PlacementRequired},
-		{"unknown counts as production", "", testPool, PlacementRequired, EnvironmentUnknown, PlacementRequired},
-		{"management counts as production", "mgmt", testPool, PlacementRequired, "mgmt", PlacementRequired},
-		{"preferred mode", envProd, testPool, PlacementPreferred, envProd, PlacementPreferred},
-		{"empty label value is a valid pool", envProd, "example.io/pool=", PlacementRequired, envProd, PlacementRequired},
-		{"non-production is not steered", envTest, testPool, PlacementRequired, envTest, ""},
-		{"no pool configured", envProd, "", PlacementRequired, envProd, ""},
-		{"invalid label value", "not a label!", "", PlacementRequired, EnvironmentUnknown, ""},
+		{"production, required", envProd, testPool, PlacementRequired, NonProdAllowed, envProd, reqIn},
+		{"second spelling, labelled prod", "production", testPool, PlacementRequired, NonProdAllowed, envProd, reqIn},
+		{"unknown counts as production", "", testPool, PlacementRequired, NonProdAllowed, EnvironmentUnknown, reqIn},
+		{"management counts as production", envMgmt, testPool, PlacementRequired, NonProdAllowed, envMgmt, reqIn},
+		{"preferred mode", envProd, testPool, PlacementPreferred, NonProdAllowed, envProd, prefIn},
+		{"empty label value is a valid pool", envProd, "example.io/pool=", PlacementRequired, NonProdAllowed, envProd, reqIn},
+		{"non-production allowed is not steered", envTest, testPool, PlacementRequired, NonProdAllowed, envTest, ""},
+		{"no pool configured", envProd, "", PlacementRequired, NonProdAllowed, envProd, ""},
+		{"invalid label value", "not a label!", "", PlacementRequired, NonProdAllowed, EnvironmentUnknown, ""},
+		// Non-production kept off the pool.
+		{"non-production avoided", envTest, testPool, PlacementRequired, NonProdAvoided, envTest, prefNotIn},
+		{"non-production forbidden", envTest, testPool, PlacementRequired, NonProdForbidden, envTest, reqNotIn},
+		{"forbidden ignores the production mode", "dev", testPool, PlacementPreferred, NonProdForbidden, "dev", reqNotIn},
+		{"avoided ignores the production mode", "qa", testPool, PlacementRequired, NonProdAvoided, "qa", prefNotIn},
+		{"production unaffected by forbidden", envProd, testPool, PlacementRequired, NonProdForbidden, envProd, reqIn},
+		{"unknown stays on the pool under forbidden", "", testPool, PlacementRequired, NonProdForbidden, EnvironmentUnknown, reqIn},
+		{"management stays on the pool under forbidden", envMgmt, testPool, PlacementRequired, NonProdForbidden, envMgmt, reqIn},
+		{"forbidden without a pool adds nothing", envTest, "", PlacementRequired, NonProdForbidden, envTest, ""},
+		// The label decides: a VM labelled unknown is production, whatever the raw value was.
+		{"declared unknown stays on the pool under forbidden", EnvironmentUnknown, testPool, PlacementRequired, NonProdForbidden, EnvironmentUnknown, reqIn},
+		{"invalid environment stays on the pool under forbidden", "not a label!", testPool, PlacementRequired, NonProdForbidden, EnvironmentUnknown, reqIn},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			viper.Set(consts.PROD_POOL_NODE_LABEL, tc.pool)
 			viper.Set(consts.PROD_POOL_PLACEMENT, tc.mode)
+			viper.Set(consts.NON_PROD_ON_PROD_POOL, tc.nonProd)
 			t.Cleanup(viper.Reset)
 
 			vm, err := applyPlacement(newPlacementVM(), tc.env)
@@ -112,8 +133,9 @@ func TestApplyPlacement(t *testing.T) {
 	}
 }
 
-// nodeAffinityForm says which pool rule the VM carries: "", "required" or
-// "preferred"; "invalid" when it carries anything else.
+// nodeAffinityForm says which pool rule the VM carries, as "<form> <operator>"
+// such as "required In" or "preferred NotIn"; "" for none and "invalid" when
+// it carries anything else.
 func nodeAffinityForm(vm *kubevirtv1.VirtualMachine) string {
 	aff := vm.Spec.Template.Spec.Affinity
 	if aff == nil || aff.NodeAffinity == nil {
@@ -121,40 +143,59 @@ func nodeAffinityForm(vm *kubevirtv1.VirtualMachine) string {
 	}
 	req, pref := aff.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution, aff.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution
 	switch {
-	case req != nil && len(pref) == 0 && len(req.NodeSelectorTerms) == 1 && isPoolTerm(req.NodeSelectorTerms[0]):
-		return PlacementRequired
-	case req == nil && len(pref) == 1 && isPoolTerm(pref[0].Preference):
-		return PlacementPreferred
+	case req != nil && len(pref) == 0 && len(req.NodeSelectorTerms) == 1:
+		if op, ok := poolTermOperator(req.NodeSelectorTerms[0]); ok {
+			return PlacementRequired + " " + op
+		}
+	case req == nil && len(pref) == 1 && pref[0].Weight == 100:
+		if op, ok := poolTermOperator(pref[0].Preference); ok {
+			return PlacementPreferred + " " + op
+		}
 	}
 	return "invalid"
 }
 
-func isPoolTerm(term corev1.NodeSelectorTerm) bool {
+// poolTermOperator returns the operator of a term that names the test pool and
+// nothing else.
+func poolTermOperator(term corev1.NodeSelectorTerm) (string, bool) {
 	if len(term.MatchExpressions) != 1 {
-		return false
+		return "", false
 	}
 	r := term.MatchExpressions[0]
-	return r.Key == "example.io/pool" && r.Operator == corev1.NodeSelectorOpIn && len(r.Values) == 1
+	if r.Key != "example.io/pool" || len(r.Values) != 1 {
+		return "", false
+	}
+	if r.Operator != corev1.NodeSelectorOpIn && r.Operator != corev1.NodeSelectorOpNotIn {
+		return "", false
+	}
+	return string(r.Operator), true
 }
 
 // TestPlacementSettingsValidation pins which settings are refused, both at
 // startup and when a VM is built.
 func TestPlacementSettingsValidation(t *testing.T) {
 	for _, tc := range []struct {
-		name, pool, mode string
-		wantErr          bool
+		name, pool, mode, nonProd string
+		wantErr                   bool
 	}{
-		{"unset pool", "", PlacementRequired, false},
-		{"valid pool", testPool, PlacementPreferred, false},
-		{"no equals sign", "example.io/pool", PlacementRequired, true},
-		{"second equals sign", "example.io/pool=prod=blue", PlacementRequired, true},
-		{"empty key", "=prod", PlacementRequired, true},
-		{"invalid key", "not a key=prod", PlacementRequired, true},
-		{"unknown mode", testPool, "sometimes", true},
+		{"unset pool", "", PlacementRequired, NonProdAllowed, false},
+		{"valid pool", testPool, PlacementPreferred, NonProdAllowed, false},
+		{"no equals sign", "example.io/pool", PlacementRequired, NonProdAllowed, true},
+		{"second equals sign", "example.io/pool=prod=blue", PlacementRequired, NonProdAllowed, true},
+		{"empty key", "=prod", PlacementRequired, NonProdAllowed, true},
+		{"invalid key", "not a key=prod", PlacementRequired, NonProdAllowed, true},
+		{"unknown mode", testPool, "sometimes", NonProdAllowed, true},
+		{"non-production avoided with a pool", testPool, PlacementRequired, NonProdAvoided, false},
+		{"non-production forbidden with a pool", testPool, PlacementRequired, NonProdForbidden, false},
+		{"non-production forbidden without a pool", "", PlacementRequired, NonProdForbidden, true},
+		{"non-production avoided without a pool", "", PlacementRequired, NonProdAvoided, true},
+		{"scheduler word instead of plain word", testPool, PlacementRequired, PlacementRequired, true},
+		{"empty non-production setting", testPool, PlacementRequired, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			viper.Set(consts.PROD_POOL_NODE_LABEL, tc.pool)
 			viper.Set(consts.PROD_POOL_PLACEMENT, tc.mode)
+			viper.Set(consts.NON_PROD_ON_PROD_POOL, tc.nonProd)
 			t.Cleanup(viper.Reset)
 
 			if err := ValidatePlacementSettings(); (err != nil) != tc.wantErr {
@@ -168,6 +209,13 @@ func TestPlacementSettingsValidation(t *testing.T) {
 	t.Cleanup(viper.Reset)
 	if _, err := applyPlacement(newPlacementVM(), envProd); err == nil {
 		t.Fatal("applyPlacement accepted a malformed pool label")
+	}
+
+	// A malformed non-production setting must fail a non-production VM too.
+	viper.Set(consts.PROD_POOL_NODE_LABEL, testPool)
+	viper.Set(consts.NON_PROD_ON_PROD_POOL, "never")
+	if _, err := applyPlacement(newPlacementVM(), envTest); err == nil {
+		t.Fatal("applyPlacement accepted a malformed non-production setting")
 	}
 }
 

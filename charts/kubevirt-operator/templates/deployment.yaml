@@ -103,6 +103,15 @@ spec:
               value: {{ .Values.prodPoolNodeLabel | quote }}
             - name: PROD_POOL_PLACEMENT
               value: {{ .Values.prodPoolPlacement | quote }}
+            {{- $nonProd := .Values.nonProdOnProdPool | default "allowed" }}
+            {{- if not (has $nonProd (list "allowed" "avoided" "forbidden")) }}
+            {{- fail (printf "nonProdOnProdPool %q: expected allowed, avoided or forbidden" $nonProd) }}
+            {{- end }}
+            {{- if and (ne $nonProd "allowed") (not (.Values.prodPoolNodeLabel | default "" | trim)) }}
+            {{- fail (printf "nonProdOnProdPool %q needs prodPoolNodeLabel to be set" $nonProd) }}
+            {{- end }}
+            - name: NON_PROD_ON_PROD_POOL
+              value: {{ $nonProd | quote }}
             {{- if .Values.deschedulerAnnotation }}
             - name: DESCHEDULER_ANNOTATION
               value: {{ .Values.deschedulerAnnotation | quote }}

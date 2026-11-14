@@ -46,8 +46,9 @@ func Init() {
 	viper.SetDefault(consts.REMOTE_CLIENT_QPS, 50)    // client-go default is 5; raise for per-reconcile call volume
 	viper.SetDefault(consts.REMOTE_CLIENT_BURST, 100) // client-go default is 10
 	viper.SetDefault(consts.PLACEMENT_POLICY, "spreadconstraint")
-	viper.SetDefault(consts.PROD_POOL_NODE_LABEL, "")        // Empty means no production pool rule
-	viper.SetDefault(consts.PROD_POOL_PLACEMENT, "required") // Options: "required" (default) or "preferred"
+	viper.SetDefault(consts.PROD_POOL_NODE_LABEL, "")         // Empty means no production pool rule
+	viper.SetDefault(consts.PROD_POOL_PLACEMENT, "required")  // Options: "required" (default) or "preferred"
+	viper.SetDefault(consts.NON_PROD_ON_PROD_POOL, "allowed") // Options: "allowed" (default), "avoided" or "forbidden"
 	viper.SetDefault(consts.DESCHEDULER_ANNOTATION, false)
 
 	dotenv.LoadDotEnv()

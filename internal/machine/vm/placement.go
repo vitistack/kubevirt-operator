@@ -29,6 +29,13 @@ const (
 	PlacementPreferred = "preferred"
 )
 
+// Values of NON_PROD_ON_PROD_POOL.
+const (
+	NonProdAllowed   = "allowed"
+	NonProdAvoided   = "avoided"
+	NonProdForbidden = "forbidden"
+)
+
 const kubernetesClusterKind = "KubernetesCluster"
 
 // environmentLookupTimeout bounds the read of the owning KubernetesCluster, so
@@ -63,17 +70,35 @@ func prodPool() (key, value string, ok bool, err error) {
 }
 
 // ValidatePlacementSettings rejects a malformed pool label or placement mode,
-// so a typo stops the operator at startup instead of misplacing VMs.
+// so a typo stops the operator at startup instead of misplacing VMs. Keeping
+// non-production VMs off a pool that is not configured is refused too: the
+// site would believe its pool is protected while nothing is.
 func ValidatePlacementSettings() error {
-	if _, _, _, err := prodPool(); err != nil {
+	_, _, poolSet, err := prodPool()
+	if err != nil {
 		return err
 	}
 	switch mode := viper.GetString(consts.PROD_POOL_PLACEMENT); mode {
 	case PlacementRequired, PlacementPreferred:
-		return nil
 	default:
 		return fmt.Errorf("%s %q: expected %q or %q", consts.PROD_POOL_PLACEMENT, mode, PlacementRequired, PlacementPreferred)
 	}
+	nonProd := viper.GetString(consts.NON_PROD_ON_PROD_POOL)
+	if err := validNonProd(nonProd); err != nil {
+		return err
+	}
+	if nonProd != NonProdAllowed && !poolSet {
+		return fmt.Errorf("%s %q needs %s to be set", consts.NON_PROD_ON_PROD_POOL, nonProd, consts.PROD_POOL_NODE_LABEL)
+	}
+	return nil
+}
+
+func validNonProd(v string) error {
+	switch v {
+	case NonProdAllowed, NonProdAvoided, NonProdForbidden:
+		return nil
+	}
+	return fmt.Errorf("%s %q: expected %q, %q or %q", consts.NON_PROD_ON_PROD_POOL, v, NonProdAllowed, NonProdAvoided, NonProdForbidden)
 }
 
 // machineEnvironment returns the environment declared on the KubernetesCluster
@@ -103,11 +128,13 @@ func (m *VMManager) machineEnvironment(ctx context.Context, machine *vitistackv1
 	return ""
 }
 
-// isProduction says whether env is a production environment. Management
-// clusters run production infrastructure, and an unknown environment also
-// counts as production.
-func isProduction(env string) bool {
-	return env == "" || env == "prod" || env == "production" || env == "mgmt"
+// isProduction says whether a VM with this environment label is production.
+// It reads the label rather than the raw environment, so the label and the
+// rule always agree. Management clusters run production infrastructure, and a
+// VM labelled unknown (no environment, an unreadable cluster, or a value that
+// is not a valid label) also counts as production.
+func isProduction(label string) bool {
+	return label == "prod" || label == "mgmt" || label == EnvironmentUnknown
 }
 
 // environmentLabel is the label value for env: "production" is written as
@@ -119,10 +146,11 @@ func environmentLabel(env string) string {
 	return env
 }
 
-// applyPlacement labels the VM with its environment and, for a production VM
-// on a site with a pool configured, adds node affinity for the pool. It keeps
+// applyPlacement labels the VM with its environment and, on a site with a pool
+// configured, adds node affinity: a production VM for the pool, and a
+// non-production VM against it when NON_PROD_ON_PROD_POOL says so. It keeps
 // any pod affinity already set by the placement policy. It fails on a
-// malformed pool setting rather than creating a production VM without the rule.
+// malformed setting rather than creating a VM without its rule.
 func applyPlacement(vm *kubevirtv1.VirtualMachine, env string) (*kubevirtv1.VirtualMachine, error) {
 	label := environmentLabel(env)
 	if label == "" || len(validation.IsValidLabelValue(label)) > 0 {
@@ -141,15 +169,33 @@ func applyPlacement(vm *kubevirtv1.VirtualMachine, env string) (*kubevirtv1.Virt
 	if err != nil {
 		return nil, err
 	}
-	if !ok || !isProduction(env) {
+	if !ok {
 		return vm, nil
 	}
 
+	operator, mode := corev1.NodeSelectorOpIn, viper.GetString(consts.PROD_POOL_PLACEMENT)
+	if !isProduction(label) {
+		nonProd := viper.GetString(consts.NON_PROD_ON_PROD_POOL)
+		if err := validNonProd(nonProd); err != nil {
+			return nil, err
+		}
+		switch nonProd {
+		case NonProdAllowed:
+			return vm, nil
+		case NonProdAvoided:
+			operator, mode = corev1.NodeSelectorOpNotIn, PlacementPreferred
+		case NonProdForbidden:
+			operator, mode = corev1.NodeSelectorOpNotIn, PlacementRequired
+		}
+	}
+
+	// NotIn also matches hosts without the label, so an unlabelled host stays
+	// open to non-production VMs.
 	term := corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{
-		{Key: key, Operator: corev1.NodeSelectorOpIn, Values: []string{value}},
+		{Key: key, Operator: operator, Values: []string{value}},
 	}}
 	nodeAffinity := &corev1.NodeAffinity{}
-	if viper.GetString(consts.PROD_POOL_PLACEMENT) == PlacementPreferred {
+	if mode == PlacementPreferred {
 		nodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = []corev1.PreferredSchedulingTerm{{Weight: 100, Preference: term}}
 	} else {
 		nodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{term}}
